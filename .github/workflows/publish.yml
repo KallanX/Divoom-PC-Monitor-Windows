@@ -14,10 +14,10 @@ jobs:
     runs-on: windows-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json
 
@@ -34,10 +34,10 @@ jobs:
         rid: [win-x64, win-arm64]
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v6
         with:
           global-json-file: global.json
 
@@ -60,7 +60,7 @@ jobs:
         run: ./publish.ps1 -Runtime ${{ matrix.rid }} -Version "${{ steps.version.outputs.version }}" -SkipTest
 
       - name: Upload the zip
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: DivoomPcMonitor-${{ matrix.rid }}
           path: dist/DivoomPcMonitor-*-${{ matrix.rid }}.zip
@@ -71,8 +71,13 @@ jobs:
     needs: publish
     runs-on: windows-latest
     steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
       - name: Download the zips
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: DivoomPcMonitor-*
           path: release
@@ -81,16 +86,17 @@ jobs:
       - name: Publish the GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         shell: pwsh
         run: |
           $PSNativeCommandUseErrorActionPreference = $false
           $tag = "${{ github.ref_name }}"
           $zips = @(Get-ChildItem -Path release -Filter *.zip)
           if ($zips.Count -lt 2) { throw "Expected both Windows zips. Found $($zips.Count)." }
-          gh release view $tag --json tagName
+          gh release view $tag --repo $env:GH_REPO --json tagName
           if ($LASTEXITCODE -eq 0) {
-            gh release upload $tag $zips.FullName --clobber
+            gh release upload $tag $zips.FullName --repo $env:GH_REPO --clobber
           } else {
-            gh release create $tag $zips.FullName --title $tag --generate-notes
+            gh release create $tag $zips.FullName --repo $env:GH_REPO --title $tag --generate-notes
           }
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
