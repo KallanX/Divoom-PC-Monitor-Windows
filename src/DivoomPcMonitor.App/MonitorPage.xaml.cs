@@ -11,7 +11,6 @@ public sealed partial class MonitorPage : Page
     public MonitorPage()
     {
         InitializeComponent();
-        VersionText.Text = "Version " + Product.Version;
     }
 
     protected override void OnNavigatedTo(NavigationEventArgs e)
@@ -21,7 +20,6 @@ public sealed partial class MonitorPage : Page
         IntervalBox.Value = Session.Current.Settings.IntervalSeconds;
         LoginSwitch.IsOn = LoginStartup.IsEnabled();
         DebugSwitch.IsOn = Session.Current.Settings.DebugLog;
-        MonitorSwitch.IsOn = Session.Current.Monitoring;
         _ready = true;
         Session.Current.Changed += OnChanged;
         Refresh();
@@ -53,14 +51,9 @@ public sealed partial class MonitorPage : Page
         StatusBar.Severity = session.Status.Contains("ERROR", StringComparison.OrdinalIgnoreCase)
             ? InfoBarSeverity.Error
             : session.Monitoring ? InfoBarSeverity.Success : InfoBarSeverity.Informational;
-        if (MonitorSwitch.IsOn != session.Monitoring)
-        {
-            _ready = false;
-            MonitorSwitch.IsOn = session.Monitoring;
-            _ready = true;
-        }
+        RunIcon.Symbol = session.Monitoring ? Symbol.Pause : Symbol.Play;
+        RunLabel.Text = session.Monitoring ? "Pause" : "Start";
 
-        LogText.Text = string.Join(Environment.NewLine, session.RecentLines.TakeLast(8));
         if (session.HasConfig && session.ConfigPath is not null)
         {
             try
@@ -91,27 +84,18 @@ public sealed partial class MonitorPage : Page
         Session.Current.SetInterval(seconds);
     }
 
-    private void MonitorSwitch_Toggled(object sender, RoutedEventArgs e)
+    private void RunButton_Click(object sender, RoutedEventArgs e)
     {
-        if (!_ready)
-        {
-            return;
-        }
-
-        if (MonitorSwitch.IsOn)
-        {
-            Session.Current.Start();
-            if (!Session.Current.Monitoring)
-            {
-                _ready = false;
-                MonitorSwitch.IsOn = false;
-                _ready = true;
-            }
-        }
-        else
+        if (Session.Current.Monitoring)
         {
             Session.Current.Stop();
         }
+        else
+        {
+            Session.Current.Start();
+        }
+
+        Refresh();
     }
 
     private void LoginSwitch_Toggled(object sender, RoutedEventArgs e)

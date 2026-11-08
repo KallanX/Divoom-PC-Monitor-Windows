@@ -16,12 +16,16 @@ public sealed partial class MainWindow : Window
 {
     private bool _quit;
     private bool _navigating;
+    private bool _trayDisposed;
 
     public ICommand OpenCommand { get; }
+
+    public ICommand QuitCommand { get; }
 
     public MainWindow()
     {
         OpenCommand = new RelayCommand(BringToFront);
+        QuitCommand = new RelayCommand(Quit);
         InitializeComponent();
         Session.Current.Ui = DispatcherQueue;
         Session.Current.NavigateRequested += ShowPage;
@@ -55,7 +59,7 @@ public sealed partial class MainWindow : Window
             eventArgs.Cancel = true;
             AppWindow.Hide();
         };
-        Closed += (_, _) => Tray.Dispose();
+        Closed += (_, _) => DisposeTray();
         Nav.SelectedItem = Nav.MenuItems[0];
     }
 
@@ -87,20 +91,52 @@ public sealed partial class MainWindow : Window
 
     public void Quit()
     {
+        if (_quit)
+        {
+            return;
+        }
+
         _quit = true;
-        Session.Current.Stop();
-        Tray.Dispose();
-        Close();
+        DispatcherQueue.TryEnqueue(FinishQuit);
     }
 
-    private void Open_Click(object sender, RoutedEventArgs args)
+    private void FinishQuit()
     {
-        BringToFront();
+        try
+        {
+            Session.Current.Stop();
+        }
+        catch (Exception)
+        {
+        }
+
+        DisposeTray();
+        try
+        {
+            Close();
+        }
+        catch (Exception)
+        {
+        }
+
+        Application.Current.Exit();
     }
 
-    private void Quit_Click(object sender, RoutedEventArgs args)
+    private void DisposeTray()
     {
-        Quit();
+        if (_trayDisposed)
+        {
+            return;
+        }
+
+        _trayDisposed = true;
+        try
+        {
+            Tray.Dispose();
+        }
+        catch (Exception)
+        {
+        }
     }
 
     private void Nav_SelectionChanged(NavigationView sender, NavigationViewSelectionChangedEventArgs args)
@@ -129,7 +165,13 @@ public sealed partial class MainWindow : Window
                 }
             }
 
-            var page = tag == "setup" ? typeof(SetupPage) : typeof(MonitorPage);
+            var page = tag switch
+            {
+                "setup" => typeof(SetupPage),
+                "log" => typeof(LogPage),
+                "about" => typeof(AboutPage),
+                _ => typeof(MonitorPage),
+            };
             if (RootFrame.CurrentSourcePageType != page)
             {
                 RootFrame.Navigate(page);

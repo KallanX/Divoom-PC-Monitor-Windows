@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Page
+    x:Class="DivoomPcMonitor.LogPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    NavigationCacheMode="Enabled">
+    <Grid Padding="28,20,28,28" RowSpacing="12">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+        <TextBlock Style="{StaticResource TitleTextBlockStyle}" Text="Log" />
+        <TextBlock
+            Grid.Row="1"
+            Opacity="0.8"
+            Style="{StaticResource BodyTextBlockStyle}"
+            TextWrapping="Wrap"
+            Text="Lines from this run. Write a debug log on the Monitor page to also append them to %LOCALAPPDATA%\DivoomPCMonitor\LogFile.log." />
+        <Border Grid.Row="2" Style="{StaticResource StatCard}">
+            <ScrollViewer x:Name="LogScroller">
+                <TextBlock
+                    x:Name="LogText"
+                    FontFamily="Consolas"
+                    IsTextSelectionEnabled="True"
+                    TextWrapping="Wrap"
+                    Text="No log lines yet." />
+            </ScrollViewer>
+        </Border>
+    </Grid>
+</Page>

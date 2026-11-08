@@ -23,6 +23,16 @@
                         <SymbolIcon Symbol="Setting" />
                     </NavigationViewItem.Icon>
                 </NavigationViewItem>
+                <NavigationViewItem Content="Log" Tag="log">
+                    <NavigationViewItem.Icon>
+                        <SymbolIcon Symbol="List" />
+                    </NavigationViewItem.Icon>
+                </NavigationViewItem>
+                <NavigationViewItem Content="About" Tag="about">
+                    <NavigationViewItem.Icon>
+                        <SymbolIcon Symbol="Help" />
+                    </NavigationViewItem.Icon>
+                </NavigationViewItem>
             </NavigationView.MenuItems>
             <Frame x:Name="RootFrame" />
         </NavigationView>
@@ -34,9 +44,9 @@
             LeftClickCommand="{x:Bind OpenCommand}">
             <tb:TaskbarIcon.ContextFlyout>
                 <MenuFlyout>
-                    <MenuFlyoutItem Text="Open" Click="Open_Click" />
+                    <MenuFlyoutItem Text="Open" Command="{x:Bind OpenCommand}" />
                     <MenuFlyoutSeparator />
-                    <MenuFlyoutItem Text="Quit" Click="Quit_Click" />
+                    <MenuFlyoutItem Text="Quit" Command="{x:Bind QuitCommand}" />
                 </MenuFlyout>
             </tb:TaskbarIcon.ContextFlyout>
         </tb:TaskbarIcon>

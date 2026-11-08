@@ -22,7 +22,7 @@ public sealed partial class SetupPage : Page
     private int _driveIndex;
     private int _gpuIndex;
     private int _stepIndex;
-    private bool _loaded;
+    private bool _wizard;
 
     public SetupPage()
     {
@@ -32,15 +32,88 @@ public sealed partial class SetupPage : Page
     protected override void OnNavigatedTo(NavigationEventArgs e)
     {
         base.OnNavigatedTo(e);
-        if (!_loaded)
-        {
-            _loaded = true;
-            _ = LoadDevicesAsync();
-        }
-        else
+        if (_wizard)
         {
             ShowStep();
+            return;
         }
+
+        if (!ShowSummary())
+        {
+            BeginWizard();
+        }
+    }
+
+    private void Recreate_Click(object sender, RoutedEventArgs e)
+    {
+        BeginWizard();
+    }
+
+    private void BeginWizard()
+    {
+        _wizard = true;
+        _stepIndex = 0;
+        SummaryView.Visibility = Visibility.Collapsed;
+        WizardView.Visibility = Visibility.Visible;
+        RecreateButton.Visibility = Visibility.Collapsed;
+        BackButton.Visibility = Visibility.Visible;
+        NextButton.Visibility = Visibility.Visible;
+        _ = LoadDevicesAsync();
+    }
+
+    private bool ShowSummary()
+    {
+        var path = Session.Current.ConfigPath;
+        if (string.IsNullOrEmpty(path) || !File.Exists(path))
+        {
+            return false;
+        }
+
+        SummaryView.Visibility = Visibility.Visible;
+        WizardView.Visibility = Visibility.Collapsed;
+        RecreateButton.Visibility = Visibility.Visible;
+        BackButton.Visibility = Visibility.Collapsed;
+        NextButton.Visibility = Visibility.Collapsed;
+        StepTitle.Text = "Current configuration";
+        FileText.Text = path;
+        try
+        {
+            var config = ConfigStore.Read(path);
+            SetValue(DeviceIdText, config.DeviceId);
+            SetValue(DeviceIpText, config.DeviceIp);
+            SetValue(LcdIndependenceText, config.LcdIndependence);
+            SetValue(LcdIndexText, config.LcdIndex);
+            SetValue(LcdClockText, config.LcdClockId);
+            SetValue(DrivesText, config.HardDrive.Count == 0 ? "" : string.Join(", ", config.HardDrive));
+            SetValue(CpuText, config.CpuVendor);
+            SetValue(GpuVendorText, config.GpuVendor);
+            SetValue(GpuNameText, config.GpuName);
+            SetValue(GpuPciText, config.GpuPci);
+            SetValue(GpuLuidText, config.GpuLuid);
+            Notice.IsOpen = false;
+        }
+        catch (Exception ex)
+        {
+            SetValue(DeviceIdText, "");
+            SetValue(DeviceIpText, "");
+            SetValue(LcdIndependenceText, "");
+            SetValue(LcdIndexText, "");
+            SetValue(LcdClockText, "");
+            SetValue(DrivesText, "");
+            SetValue(CpuText, "");
+            SetValue(GpuVendorText, "");
+            SetValue(GpuNameText, "");
+            SetValue(GpuPciText, "");
+            SetValue(GpuLuidText, "");
+            ShowError(ex.Message);
+        }
+
+        return true;
+    }
+
+    private static void SetValue(TextBlock block, string value)
+    {
+        block.Text = string.IsNullOrWhiteSpace(value) ? "Not set" : value;
     }
 
     private async Task LoadDevicesAsync()
@@ -328,6 +401,7 @@ public sealed partial class SetupPage : Page
             Notice.Severity = InfoBarSeverity.Success;
             Notice.Message = "Configuration saved. The device is showing the PC Monitor app.";
             Notice.IsOpen = true;
+            _wizard = false;
             if (!Session.Current.Monitoring)
             {
                 Session.Current.Start();

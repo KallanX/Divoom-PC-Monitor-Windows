@@ -18,14 +18,76 @@
             Grid.Row="1"
             Margin="0,8,0,12"
             Style="{StaticResource SubtitleTextBlockStyle}"
-            Text="Looking for Divoom devices…" />
+            Text="Current configuration" />
         <InfoBar x:Name="Notice" Grid.Row="2" Margin="0,0,0,12" IsOpen="False" IsClosable="False" />
-        <ScrollViewer Grid.Row="3">
+        <ScrollViewer x:Name="SummaryView" Grid.Row="3">
+            <StackPanel Spacing="12" MaxWidth="760" HorizontalAlignment="Left">
+                <TextBlock
+                    Opacity="0.8"
+                    Style="{StaticResource BodyTextBlockStyle}"
+                    TextWrapping="Wrap"
+                    Text="This computer already has a configuration. Recreate walks through the device, screen, drive, and GPU again. Apply replaces this file and selects the PC Monitor app." />
+                <Border Style="{StaticResource StatCard}">
+                    <StackPanel Spacing="12">
+                        <StackPanel Spacing="2">
+                            <TextBlock Text="File" Style="{StaticResource CaptionTextBlockStyle}" />
+                            <TextBlock x:Name="FileText" Style="{StaticResource BodyTextBlockStyle}" TextWrapping="Wrap" IsTextSelectionEnabled="True" />
+                        </StackPanel>
+                        <StackPanel Spacing="2">
+                            <TextBlock Text="Device id" Style="{StaticResource CaptionTextBlockStyle}" />
+                            <TextBlock x:Name="DeviceIdText" Style="{StaticResource BodyTextBlockStyle}" />
+                        </StackPanel>
+                        <StackPanel Spacing="2">
+                            <TextBlock Text="Device IP" Style="{StaticResource CaptionTextBlockStyle}" />
+                            <TextBlock x:Name="DeviceIpText" Style="{StaticResource BodyTextBlockStyle}" />
+                        </StackPanel>
+                        <StackPanel Spacing="2">
+                            <TextBlock Text="LCD independence" Style="{StaticResource CaptionTextBlockStyle}" />
+                            <TextBlock x:Name="LcdIndependenceText" Style="{StaticResource BodyTextBlockStyle}" />
+                        </StackPanel>
+                        <StackPanel Spacing="2">
+                            <TextBlock Text="LCD index" Style="{StaticResource CaptionTextBlockStyle}" />
+                            <TextBlock x:Name="LcdIndexText" Style="{StaticResource BodyTextBlockStyle}" />
+                        </StackPanel>
+                        <StackPanel Spacing="2">
+                            <TextBlock Text="Stored clock id" Style="{StaticResource CaptionTextBlockStyle}" />
+                            <TextBlock x:Name="LcdClockText" Style="{StaticResource BodyTextBlockStyle}" />
+                        </StackPanel>
+                        <StackPanel Spacing="2">
+                            <TextBlock Text="Drives" Style="{StaticResource CaptionTextBlockStyle}" />
+                            <TextBlock x:Name="DrivesText" Style="{StaticResource BodyTextBlockStyle}" TextWrapping="Wrap" />
+                        </StackPanel>
+                        <StackPanel Spacing="2">
+                            <TextBlock Text="CPU vendor" Style="{StaticResource CaptionTextBlockStyle}" />
+                            <TextBlock x:Name="CpuText" Style="{StaticResource BodyTextBlockStyle}" />
+                        </StackPanel>
+                        <StackPanel Spacing="2">
+                            <TextBlock Text="GPU vendor" Style="{StaticResource CaptionTextBlockStyle}" />
+                            <TextBlock x:Name="GpuVendorText" Style="{StaticResource BodyTextBlockStyle}" />
+                        </StackPanel>
+                        <StackPanel Spacing="2">
+                            <TextBlock Text="GPU name" Style="{StaticResource CaptionTextBlockStyle}" />
+                            <TextBlock x:Name="GpuNameText" Style="{StaticResource BodyTextBlockStyle}" TextWrapping="Wrap" />
+                        </StackPanel>
+                        <StackPanel Spacing="2">
+                            <TextBlock Text="GPU PCI" Style="{StaticResource CaptionTextBlockStyle}" />
+                            <TextBlock x:Name="GpuPciText" Style="{StaticResource BodyTextBlockStyle}" />
+                        </StackPanel>
+                        <StackPanel Spacing="2">
+                            <TextBlock Text="GPU LUID" Style="{StaticResource CaptionTextBlockStyle}" />
+                            <TextBlock x:Name="GpuLuidText" Style="{StaticResource BodyTextBlockStyle}" TextWrapping="Wrap" />
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+            </StackPanel>
+        </ScrollViewer>
+        <ScrollViewer x:Name="WizardView" Grid.Row="3" Visibility="Collapsed">
             <StackPanel x:Name="Body" Spacing="8" MaxWidth="760" HorizontalAlignment="Left" />
         </ScrollViewer>
         <StackPanel Grid.Row="4" Margin="0,16,0,0" Orientation="Horizontal" Spacing="8">
-            <Button x:Name="BackButton" Content="Back" Click="Back_Click" />
-            <Button x:Name="NextButton" Content="Next" Style="{StaticResource AccentButtonStyle}" Click="Next_Click" />
+            <Button x:Name="RecreateButton" Content="Recreate configuration" Style="{StaticResource AccentButtonStyle}" Click="Recreate_Click" />
+            <Button x:Name="BackButton" Content="Back" Visibility="Collapsed" Click="Back_Click" />
+            <Button x:Name="NextButton" Content="Next" Style="{StaticResource AccentButtonStyle}" Visibility="Collapsed" Click="Next_Click" />
             <ProgressRing x:Name="Busy" Width="24" Height="24" IsActive="False" />
         </StackPanel>
     </Grid>

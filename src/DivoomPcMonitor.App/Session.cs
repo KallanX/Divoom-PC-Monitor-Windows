@@ -167,7 +167,7 @@ public sealed class Session
         lock (_gate)
         {
             _lines.Add(message);
-            if (_lines.Count > 40)
+            if (_lines.Count > 200)
             {
                 _lines.RemoveAt(0);
             }
