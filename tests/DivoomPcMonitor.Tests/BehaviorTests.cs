@@ -306,17 +306,27 @@ public class BehaviorTests
     [Fact]
     public void InstalledConfigIsFoundByWalkingUpAndIsNotRewritten()
     {
-        var root = RepoRoot();
+        var root = Path.Combine(Path.GetTempPath(), "divoom-walk-" + Guid.NewGuid().ToString("n"));
+        var start = Path.Combine(root, "tests", "DivoomPcMonitor.Tests");
+        Directory.CreateDirectory(start);
         var configPath = Path.Combine(root, "config.env");
+        File.WriteAllText(configPath, "[DEFAULT]\ndevice_id=1\ndevice_ip=10.1.2.3\nlcd_independence=0\nlcd_index=0\nlcd_clock_id=625\nhard_drive=C:\n");
         var before = File.GetLastWriteTimeUtc(configPath);
         var length = new FileInfo(configPath).Length;
-        var found = ConfigLocator.Find(Path.Combine(root, "tests", "DivoomPcMonitor.Tests"), Path.Combine(root, "tests"));
-        Assert.Equal(Path.GetFullPath(configPath), found is null ? null : Path.GetFullPath(found));
-        var config = ConfigStore.Read(configPath);
-        Assert.Equal("192.168.1.232", config.DeviceIp);
-        Assert.Equal("C:", config.HardDrive[0]);
-        Assert.Equal(before, File.GetLastWriteTimeUtc(configPath));
-        Assert.Equal(length, new FileInfo(configPath).Length);
+        try
+        {
+            var found = ConfigLocator.Find(start, Path.Combine(root, "tests"));
+            Assert.Equal(Path.GetFullPath(configPath), found is null ? null : Path.GetFullPath(found));
+            var config = ConfigStore.Read(configPath);
+            Assert.Equal("10.1.2.3", config.DeviceIp);
+            Assert.Equal("C:", config.HardDrive[0]);
+            Assert.Equal(before, File.GetLastWriteTimeUtc(configPath));
+            Assert.Equal(length, new FileInfo(configPath).Length);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
     }
 
     [Fact]
@@ -432,22 +442,6 @@ public class BehaviorTests
         await engine.RunAsync(() => Path.Combine(Path.GetTempPath(), "missing-divoom-config.env"), cancel.Token);
         Assert.Empty(poster.Posts);
         Assert.Equal(TimeSpan.FromSeconds(7), Assert.Single(waits));
-    }
-
-    private static string RepoRoot()
-    {
-        var directory = new DirectoryInfo(AppContext.BaseDirectory);
-        while (directory is not null)
-        {
-            if (File.Exists(Path.Combine(directory.FullName, "global.json")))
-            {
-                return directory.FullName;
-            }
-
-            directory = directory.Parent;
-        }
-
-        throw new InvalidOperationException("Could not find the repository root.");
     }
 
     private sealed class FakeSensors : ISensorSource
