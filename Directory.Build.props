@@ -1,0 +1,12 @@
+<Project>
+  <PropertyGroup>
+    <Version>0.1.0</Version>
+    <AssemblyVersion>0.1.0.0</AssemblyVersion>
+    <FileVersion>0.1.0.0</FileVersion>
+    <InformationalVersion>0.1.0</InformationalVersion>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+    <Company>Keith Carichner Jr</Company>
+    <Product>Divoom PC Monitor</Product>
+    <Copyright>Copyright (c) 2024 Keith Carichner Jr</Copyright>
+  </PropertyGroup>
+</Project>

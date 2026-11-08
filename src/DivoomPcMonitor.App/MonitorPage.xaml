@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Page
+    x:Class="DivoomPcMonitor.MonitorPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    NavigationCacheMode="Enabled">
+    <ScrollViewer>
+        <StackPanel Padding="28,20,28,28" Spacing="16" MaxWidth="1100">
+            <TextBlock Style="{StaticResource TitleTextBlockStyle}" Text="Monitor" />
+            <TextBlock
+                x:Name="Subtitle"
+                Style="{StaticResource BodyTextBlockStyle}"
+                Opacity="0.8"
+                TextWrapping="Wrap"
+                Text="Six readings go to the Divoom, in this order: CPU, GPU, CPU temperature, GPU temperature, memory, and disk." />
+            <InfoBar x:Name="StatusBar" IsOpen="True" IsClosable="False" Severity="Informational" Title="Status" />
+
+            <Grid ColumnSpacing="12" RowSpacing="12">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+                <Border Grid.Row="0" Grid.Column="0" Style="{StaticResource StatCard}">
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="CPU" Style="{StaticResource CaptionTextBlockStyle}" />
+                        <TextBlock x:Name="CpuValue" Text="--" Style="{StaticResource StatValue}" />
+                    </StackPanel>
+                </Border>
+                <Border Grid.Row="0" Grid.Column="1" Style="{StaticResource StatCard}">
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="GPU" Style="{StaticResource CaptionTextBlockStyle}" />
+                        <TextBlock x:Name="GpuValue" Text="--" Style="{StaticResource StatValue}" />
+                    </StackPanel>
+                </Border>
+                <Border Grid.Row="0" Grid.Column="2" Style="{StaticResource StatCard}">
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="CPU temperature" Style="{StaticResource CaptionTextBlockStyle}" />
+                        <TextBlock x:Name="CpuTempValue" Text="--" Style="{StaticResource StatValue}" />
+                    </StackPanel>
+                </Border>
+                <Border Grid.Row="1" Grid.Column="0" Style="{StaticResource StatCard}">
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="GPU temperature" Style="{StaticResource CaptionTextBlockStyle}" />
+                        <TextBlock x:Name="GpuTempValue" Text="--" Style="{StaticResource StatValue}" />
+                    </StackPanel>
+                </Border>
+                <Border Grid.Row="1" Grid.Column="1" Style="{StaticResource StatCard}">
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="Memory" Style="{StaticResource CaptionTextBlockStyle}" />
+                        <TextBlock x:Name="MemoryValue" Text="--" Style="{StaticResource StatValue}" />
+                    </StackPanel>
+                </Border>
+                <Border Grid.Row="1" Grid.Column="2" Style="{StaticResource StatCard}">
+                    <StackPanel Spacing="4">
+                        <TextBlock Text="Disk" Style="{StaticResource CaptionTextBlockStyle}" />
+                        <TextBlock x:Name="DiskValue" Text="--" Style="{StaticResource StatValue}" />
+                        <TextBlock x:Name="DiskName" Opacity="0.7" Style="{StaticResource CaptionTextBlockStyle}" />
+                    </StackPanel>
+                </Border>
+            </Grid>
+
+            <Border Style="{StaticResource StatCard}">
+                <StackPanel Spacing="14">
+                    <TextBlock Text="Schedule" Style="{StaticResource SubtitleTextBlockStyle}" />
+                    <NumberBox
+                        x:Name="IntervalBox"
+                        Header="Seconds to wait after each update"
+                        Minimum="1"
+                        Maximum="86400"
+                        SmallChange="1"
+                        LargeChange="10"
+                        SpinButtonPlacementMode="Inline"
+                        ValueChanged="IntervalBox_ValueChanged" />
+                    <TextBlock
+                        Opacity="0.7"
+                        TextWrapping="Wrap"
+                        Text="Each update spends about one second measuring CPU, GPU, and disk. The wait above starts after that update finishes." />
+                    <ToggleSwitch x:Name="MonitorSwitch" Header="Send readings" OnContent="On" OffContent="Off" Toggled="MonitorSwitch_Toggled" />
+                    <ToggleSwitch x:Name="LoginSwitch" Header="Start at sign-in" OnContent="On" OffContent="Off" Toggled="LoginSwitch_Toggled" />
+                    <ToggleSwitch x:Name="DebugSwitch" Header="Write a debug log" OnContent="On" OffContent="Off" Toggled="DebugSwitch_Toggled" />
+                    <TextBlock
+                        Opacity="0.7"
+                        TextWrapping="Wrap"
+                        Text="Closing this window leaves the monitor running in the tray. Quit from the tray icon to stop it. Start at sign-in does not need administrator." />
+                </StackPanel>
+            </Border>
+
+            <TextBlock x:Name="LogText" FontFamily="Consolas" Opacity="0.8" TextWrapping="Wrap" />
+            <TextBlock x:Name="VersionText" Opacity="0.6" Style="{StaticResource CaptionTextBlockStyle}" />
+        </StackPanel>
+    </ScrollViewer>
+</Page>

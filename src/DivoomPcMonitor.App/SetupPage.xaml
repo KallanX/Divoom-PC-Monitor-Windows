@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Page
+    x:Class="DivoomPcMonitor.SetupPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    NavigationCacheMode="Enabled">
+    <Grid Padding="28,20,28,28">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+        <TextBlock Style="{StaticResource TitleTextBlockStyle}" Text="Setup" />
+        <TextBlock
+            x:Name="StepTitle"
+            Grid.Row="1"
+            Margin="0,8,0,12"
+            Style="{StaticResource SubtitleTextBlockStyle}"
+            Text="Looking for Divoom devices…" />
+        <InfoBar x:Name="Notice" Grid.Row="2" Margin="0,0,0,12" IsOpen="False" IsClosable="False" />
+        <ScrollViewer Grid.Row="3">
+            <StackPanel x:Name="Body" Spacing="8" MaxWidth="760" HorizontalAlignment="Left" />
+        </ScrollViewer>
+        <StackPanel Grid.Row="4" Margin="0,16,0,0" Orientation="Horizontal" Spacing="8">
+            <Button x:Name="BackButton" Content="Back" Click="Back_Click" />
+            <Button x:Name="NextButton" Content="Next" Style="{StaticResource AccentButtonStyle}" Click="Next_Click" />
+            <ProgressRing x:Name="Busy" Width="24" Height="24" IsActive="False" />
+        </StackPanel>
+    </Grid>
+</Page>

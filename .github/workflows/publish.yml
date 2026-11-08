@@ -1,0 +1,96 @@
+name: Publish
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    name: Test
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Test
+        run: dotnet test tests/DivoomPcMonitor.Tests/DivoomPcMonitor.Tests.csproj -c Release --nologo
+
+  publish:
+    name: Publish ${{ matrix.rid }}
+    needs: test
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        rid: [win-x64, win-arm64]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Read the tag version
+        id: version
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $version = $tag
+          if ($version.StartsWith("v") -or $version.StartsWith("V")) {
+            $version = $version.Substring(1)
+          }
+          if ($version -notmatch "^\d+\.\d+\.\d+([-+].*)?$") {
+            throw "Tag '$tag' is not a version like v0.1.0."
+          }
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Publish
+        shell: pwsh
+        run: ./publish.ps1 -Runtime ${{ matrix.rid }} -Version "${{ steps.version.outputs.version }}" -SkipTest
+
+      - name: Upload the zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: DivoomPcMonitor-${{ matrix.rid }}
+          path: dist/DivoomPcMonitor-*-${{ matrix.rid }}.zip
+          if-no-files-found: error
+
+  release:
+    name: Attach the builds to the tag
+    needs: publish
+    runs-on: windows-latest
+    steps:
+      - name: Download the zips
+        uses: actions/download-artifact@v4
+        with:
+          pattern: DivoomPcMonitor-*
+          path: release
+          merge-multiple: true
+
+      - name: Publish the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $false
+          $tag = "${{ github.ref_name }}"
+          $zips = @(Get-ChildItem -Path release -Filter *.zip)
+          if ($zips.Count -lt 2) { throw "Expected both Windows zips. Found $($zips.Count)." }
+          gh release view $tag --json tagName
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $tag $zips.FullName --clobber
+          } else {
+            gh release create $tag $zips.FullName --title $tag --generate-notes
+          }
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

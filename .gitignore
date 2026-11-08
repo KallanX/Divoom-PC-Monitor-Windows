@@ -1,0 +1,6 @@
+config.env
+.vscode/
+bin/
+obj/
+dist/
+*.sln
