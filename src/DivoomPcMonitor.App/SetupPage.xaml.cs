@@ -254,7 +254,12 @@ public sealed partial class SetupPage : Page
 
     private void AddChoices(string[] labels, int selected, Action<int> choose)
     {
-        var list = new ListView { SelectionMode = ListViewSelectionMode.Single, MaxWidth = 720 };
+        var list = new ListView
+        {
+            SelectionMode = ListViewSelectionMode.Single,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            HorizontalContentAlignment = HorizontalAlignment.Stretch,
+        };
         foreach (var label in labels)
         {
             list.Items.Add(new TextBlock { Text = label, TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 4, 0, 4) });

@@ -210,8 +210,8 @@
         </ScrollViewer>
 
         <ScrollViewer x:Name="WizardView" Grid.Row="3" Visibility="Collapsed" HorizontalScrollMode="Disabled" HorizontalScrollBarVisibility="Disabled">
-            <Border Style="{StaticResource StatCard}" MaxWidth="760" HorizontalAlignment="Stretch">
-                <StackPanel x:Name="Body" Spacing="10" />
+            <Border Style="{StaticResource StatCard}" HorizontalAlignment="Stretch">
+                <StackPanel x:Name="Body" Spacing="10" HorizontalAlignment="Stretch" />
             </Border>
         </ScrollViewer>
 
