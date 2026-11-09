@@ -244,6 +244,8 @@ public static class ConfigLocator
         Consider(Path.Combine(startDirectory, "config.env"));
         if (!string.IsNullOrWhiteSpace(executableDirectory))
         {
+            var appRoot = ResolveAppDirectory(executableDirectory);
+            Consider(Path.Combine(appRoot, "config.env"));
             Consider(Path.Combine(executableDirectory, "config.env"));
         }
 
@@ -266,6 +268,12 @@ public static class ConfigLocator
 
     public static string DefaultSavePath(string executableDirectory)
     {
+        var appRoot = ResolveAppDirectory(executableDirectory);
+        if (CanWrite(appRoot))
+        {
+            return Path.Combine(appRoot, "config.env");
+        }
+
         if (CanWrite(executableDirectory))
         {
             return Path.Combine(executableDirectory, "config.env");
@@ -274,6 +282,68 @@ public static class ConfigLocator
         var folder = LocalFolder();
         Directory.CreateDirectory(folder);
         return Path.Combine(folder, "config.env");
+    }
+
+    public static string ResolveAppDirectory(string executableDirectory)
+    {
+        if (string.IsNullOrWhiteSpace(executableDirectory))
+        {
+            return executableDirectory;
+        }
+
+        var envRoot = Environment.GetEnvironmentVariable("DIVOOM_ROOT_DIR");
+        if (!string.IsNullOrWhiteSpace(envRoot) && Directory.Exists(envRoot))
+        {
+            return Path.GetFullPath(envRoot);
+        }
+
+        try
+        {
+            var trimmed = executableDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            var info = new DirectoryInfo(trimmed);
+            if (string.Equals(info.Name, "runtime", StringComparison.OrdinalIgnoreCase) && info.Parent is not null)
+            {
+                return info.Parent.FullName;
+            }
+        }
+        catch (Exception)
+        {
+        }
+
+        return executableDirectory;
+    }
+
+    public static string? ResolveLauncherPath(string? processPath)
+    {
+        var envLauncher = Environment.GetEnvironmentVariable("DIVOOM_LAUNCHER_PATH");
+        if (!string.IsNullOrWhiteSpace(envLauncher) && File.Exists(envLauncher))
+        {
+            return Path.GetFullPath(envLauncher);
+        }
+
+        if (string.IsNullOrWhiteSpace(processPath))
+        {
+            return processPath;
+        }
+
+        try
+        {
+            var directory = Path.GetDirectoryName(processPath);
+            if (!string.IsNullOrEmpty(directory))
+            {
+                var appRoot = ResolveAppDirectory(directory);
+                var rootExe = Path.Combine(appRoot, Path.GetFileName(processPath));
+                if (File.Exists(rootExe))
+                {
+                    return Path.GetFullPath(rootExe);
+                }
+            }
+        }
+        catch (Exception)
+        {
+        }
+
+        return processPath;
     }
 
     public static string LocalFolder()

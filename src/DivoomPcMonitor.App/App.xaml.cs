@@ -1,3 +1,5 @@
+using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using Microsoft.UI.Xaml;
 
 namespace DivoomPcMonitor;
@@ -8,6 +10,117 @@ public partial class App : Application
     private EventWaitHandle? _show;
     private MainWindow? _window;
     private Thread? _showThread;
+
+    [ModuleInitializer]
+    internal static void InitializeRuntimeDirectory()
+    {
+        var baseDir = AppContext.BaseDirectory.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var processPath = Environment.ProcessPath;
+        if (string.IsNullOrEmpty(processPath))
+        {
+            return;
+        }
+
+        var processDir = Path.GetDirectoryName(processPath)?.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        if (string.IsNullOrEmpty(processDir) || string.Equals(baseDir, processDir, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        Environment.SetEnvironmentVariable("MICROSOFT_WINDOWSAPPRUNTIME_BASE_DIRECTORY", baseDir);
+        SetDllDirectoryW(baseDir);
+        var manifestPath = Path.Combine(baseDir, "app.manifest");
+        if (!File.Exists(manifestPath))
+        {
+            TryExtractManifest(manifestPath);
+        }
+
+        if (File.Exists(manifestPath))
+        {
+            var actCtx = new ActCtxW
+            {
+                Size = Marshal.SizeOf<ActCtxW>(),
+                Flags = 0,
+                Source = manifestPath,
+            };
+            var handle = CreateActCtxW(ref actCtx);
+            if (handle != IntPtr.Zero && handle != new IntPtr(-1))
+            {
+                ActivateActCtx(handle, out _);
+            }
+        }
+    }
+
+    private static void TryExtractManifest(string destinationPath)
+    {
+        try
+        {
+            var module = GetModuleHandleW(null);
+            if (module == IntPtr.Zero)
+            {
+                return;
+            }
+
+            var resInfo = FindResourceW(module, (IntPtr)1, (IntPtr)24);
+            if (resInfo == IntPtr.Zero)
+            {
+                return;
+            }
+
+            var size = SizeofResource(module, resInfo);
+            var resData = LoadResource(module, resInfo);
+            var ptr = LockResource(resData);
+            if (size == 0 || ptr == IntPtr.Zero)
+            {
+                return;
+            }
+
+            var bytes = new byte[size];
+            Marshal.Copy(ptr, bytes, 0, (int)size);
+            File.WriteAllBytes(destinationPath, bytes);
+        }
+        catch (Exception)
+        {
+        }
+    }
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    private struct ActCtxW
+    {
+        public int Size;
+        public uint Flags;
+        public string Source;
+        public ushort ProcessorArchitecture;
+        public ushort LangId;
+        public string? AssemblyDirectory;
+        public IntPtr ResourceName;
+        public string? ApplicationName;
+        public IntPtr Module;
+    }
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern bool SetDllDirectoryW(string pathName);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern IntPtr CreateActCtxW(ref ActCtxW actCtx);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool ActivateActCtx(IntPtr actCtx, out IntPtr cookie);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern IntPtr GetModuleHandleW(string? moduleName);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern IntPtr FindResourceW(IntPtr hModule, IntPtr lpName, IntPtr lpType);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern uint SizeofResource(IntPtr hModule, IntPtr hResInfo);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern IntPtr LoadResource(IntPtr hModule, IntPtr hResInfo);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern IntPtr LockResource(IntPtr hResData);
 
     public App()
     {

@@ -13,6 +13,9 @@
     <EnableMsixTooling>true</EnableMsixTooling>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <SatelliteResourceLanguages>en-US;en</SatelliteResourceLanguages>
+    <DebugType>none</DebugType>
+    <DebugSymbols>false</DebugSymbols>
     <ApplicationIcon>Assets\AppIcon.ico</ApplicationIcon>
     <Description>Send PC usage to a Divoom Times Gate or Pixoo64.</Description>
   </PropertyGroup>

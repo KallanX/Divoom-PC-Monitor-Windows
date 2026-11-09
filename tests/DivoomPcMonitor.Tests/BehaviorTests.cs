@@ -381,6 +381,15 @@ public class BehaviorTests
             Assert.Equal("C:", config.HardDrive[0]);
             Assert.Equal(before, File.GetLastWriteTimeUtc(configPath));
             Assert.Equal(length, new FileInfo(configPath).Length);
+
+            var runtimeDir = Path.Combine(root, "runtime");
+            Directory.CreateDirectory(runtimeDir);
+            var rootExe = Path.Combine(root, "DivoomPcMonitor.exe");
+            var runtimeExe = Path.Combine(runtimeDir, "DivoomPcMonitor.exe");
+            File.WriteAllText(rootExe, "");
+            File.WriteAllText(runtimeExe, "");
+            Assert.Equal(Path.GetFullPath(configPath), Path.GetFullPath(ConfigLocator.DefaultSavePath(runtimeDir)));
+            Assert.Equal(Path.GetFullPath(rootExe), Path.GetFullPath(ConfigLocator.ResolveLauncherPath(runtimeExe)!));
         }
         finally
         {

@@ -129,8 +129,13 @@ if ($Runtime -ne 'all') {
     $runtimes = @($Runtime)
 }
 
+$keepDirs = @('Assets', 'en-us', 'en-US', 'Microsoft.UI.Xaml')
+$oldDllBytes = [System.Text.Encoding]::UTF8.GetBytes("DivoomPcMonitor.dll`0")
+$newDllBytes = [System.Text.Encoding]::UTF8.GetBytes("runtime\DivoomPcMonitor.dll`0")
+
 foreach ($rid in $runtimes) {
     $output = Join-Path $Root ("dist\DivoomPcMonitor-{0}-{1}" -f $stamp.FileName, $rid)
+    $runtimeDir = Join-Path $output 'runtime'
     $zip = "$output.zip"
     if (Test-Path -LiteralPath $output) {
         Remove-Item -LiteralPath $output -Recurse -Force
@@ -141,14 +146,45 @@ foreach ($rid in $runtimes) {
     }
 
     Write-Host "Publishing $rid to $output"
-    & $dotnet publish $appProject -c $Configuration -r $rid --self-contained true -p:WindowsAppSDKSelfContained=true "-p:Version=$($stamp.Informational)" "-p:AssemblyVersion=$($stamp.Assembly)" "-p:FileVersion=$($stamp.Assembly)" "-p:InformationalVersion=$($stamp.Informational)" -p:IncludeSourceRevisionInInformationalVersion=false -o $output --nologo
+    & $dotnet publish $appProject -c $Configuration -r $rid --self-contained true -p:WindowsAppSDKSelfContained=true "-p:Version=$($stamp.Informational)" "-p:AssemblyVersion=$($stamp.Assembly)" "-p:FileVersion=$($stamp.Assembly)" "-p:InformationalVersion=$($stamp.Informational)" -p:IncludeSourceRevisionInInformationalVersion=false -o $runtimeDir --nologo
     if ($LASTEXITCODE -ne 0) {
         exit $LASTEXITCODE
     }
 
+    $runtimeExe = Join-Path $runtimeDir 'DivoomPcMonitor.exe'
+    if (-not (Test-Path -LiteralPath $runtimeExe)) {
+        throw "Publish finished without $runtimeExe"
+    }
+
+    $exeBytes = [System.IO.File]::ReadAllBytes($runtimeExe)
+    $patched = $false
+    for ($i = 0; $i -le ($exeBytes.Length - $oldDllBytes.Length); $i++) {
+        $match = $true
+        for ($j = 0; $j -lt $oldDllBytes.Length; $j++) {
+            if ($exeBytes[$i + $j] -ne $oldDllBytes[$j]) {
+                $match = $false
+                break
+            }
+        }
+        if ($match) {
+            [Array]::Copy($newDllBytes, 0, $exeBytes, $i, $newDllBytes.Length)
+            $patched = $true
+            break
+        }
+    }
+    if (-not $patched) {
+        throw "Could not relocate AppHost entry point in $runtimeExe"
+    }
+
     $exe = Join-Path $output 'DivoomPcMonitor.exe'
-    if (-not (Test-Path -LiteralPath $exe)) {
-        throw "Publish finished without $exe"
+    [System.IO.File]::WriteAllBytes($exe, $exeBytes)
+    Remove-Item -LiteralPath $runtimeExe -Force
+
+    Get-ChildItem -LiteralPath $runtimeDir -Directory | Where-Object { $keepDirs -notcontains $_.Name } | ForEach-Object {
+        Remove-Item -LiteralPath $_.FullName -Recurse -Force
+    }
+    Get-ChildItem -LiteralPath $runtimeDir -Include *.pdb,createdump.exe,RestartAgent.exe -File | ForEach-Object {
+        Remove-Item -LiteralPath $_.FullName -Force
     }
 
     Compress-Archive -Path $output -DestinationPath $zip
@@ -160,4 +196,4 @@ foreach ($rid in $runtimes) {
     Write-Host ("Zip: {0} ({1:N1} MB)" -f $zipItem.FullName, ($zipItem.Length / 1MB))
 }
 
-Write-Host 'Keep each published folder together. The exe needs the files beside it.'
+Write-Host 'Keep DivoomPcMonitor.exe and the runtime folder together.'

@@ -123,7 +123,7 @@ public sealed partial class MonitorPage : Page
             return;
         }
 
-        var path = Environment.ProcessPath;
+        var path = ConfigLocator.ResolveLauncherPath(Environment.ProcessPath);
         if (string.IsNullOrEmpty(path))
         {
             return;

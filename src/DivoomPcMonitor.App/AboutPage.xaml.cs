@@ -19,7 +19,7 @@ public sealed partial class AboutPage : Page
         CopyrightText.Text = assembly.GetCustomAttribute<AssemblyCopyrightAttribute>()?.Copyright
             ?? "Copyright (c) 2026 Keith Carichner Jr";
         ArchitectureText.Text = RuntimeInformation.ProcessArchitecture.ToString();
-        var program = Environment.ProcessPath;
+        var program = ConfigLocator.ResolveLauncherPath(Environment.ProcessPath);
         ProgramText.Text = string.IsNullOrEmpty(program) ? "Not available" : program;
         FileVersionText.Text = Product.Version;
         if (!string.IsNullOrEmpty(program))
