@@ -34,7 +34,11 @@
                     </NavigationViewItem.Icon>
                 </NavigationViewItem>
             </NavigationView.MenuItems>
-            <Frame x:Name="RootFrame" />
+            <Frame x:Name="RootFrame">
+                <Frame.RenderTransform>
+                    <TranslateTransform x:Name="FrameTransform" />
+                </Frame.RenderTransform>
+            </Frame>
         </NavigationView>
         <tb:TaskbarIcon
             x:Name="Tray"

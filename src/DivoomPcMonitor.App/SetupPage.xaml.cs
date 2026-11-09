@@ -92,6 +92,7 @@ public sealed partial class SetupPage : Page
         CancelButton.Visibility = Visibility.Collapsed;
         BackButton.Visibility = Visibility.Collapsed;
         NextButton.Visibility = Visibility.Collapsed;
+        StepIcon.Glyph = "\uE713";
         StepTitle.Text = "Current configuration";
         FileText.Text = path;
         try
@@ -196,9 +197,19 @@ public sealed partial class SetupPage : Page
         }
 
         var step = _steps[_stepIndex];
+        StepIcon.Glyph = step switch
+        {
+            SetupStep.Device => "\uE7F4",
+            SetupStep.LcdGroup => "\uE7F8",
+            SetupStep.Lcd => "\uE823",
+            SetupStep.Drive => "\uEDA2",
+            SetupStep.Gpu => "\uE950",
+            _ => "\uE73E",
+        };
         StepTitle.Text = $"Step {_stepIndex + 1} of {_steps.Count}: {TitleFor(step)}";
         BackButton.IsEnabled = _stepIndex > 0;
-        NextButton.Content = step == SetupStep.Review ? "Apply" : "Next";
+        NextButtonText.Text = step == SetupStep.Review ? "Apply" : "Next";
+        NextButtonIcon.Glyph = step == SetupStep.Review ? "\uE73E" : "\uE72A";
         switch (step)
         {
             case SetupStep.Device:

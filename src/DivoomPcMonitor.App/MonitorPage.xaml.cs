@@ -49,7 +49,7 @@ public sealed partial class MonitorPage : Page
         GpuTempValue.Text = reading.GpuTempText;
         MemoryValue.Text = reading.MemoryText;
         DiskValue.Text = reading.DiskText;
-        DiskName.Text = string.IsNullOrEmpty(reading.DiskName) ? "" : reading.DiskName;
+        DiskName.Text = string.IsNullOrEmpty(reading.DiskName) ? "--" : reading.DiskName;
         StatusBar.Message = session.Status;
         StatusBar.Severity = session.HasError || session.Status.Contains("ERROR", StringComparison.OrdinalIgnoreCase)
             ? InfoBarSeverity.Error

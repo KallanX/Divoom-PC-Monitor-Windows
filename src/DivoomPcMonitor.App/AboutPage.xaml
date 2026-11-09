@@ -5,50 +5,168 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
     <Grid Padding="28,20,28,28">
         <ScrollViewer HorizontalScrollMode="Disabled" HorizontalScrollBarVisibility="Disabled">
-        <StackPanel Spacing="16">
-            <TextBlock Style="{StaticResource TitleTextBlockStyle}" Text="About" />
-            <TextBlock
-                x:Name="DescriptionText"
-                Opacity="0.8"
-                Style="{StaticResource BodyTextBlockStyle}"
-                TextWrapping="Wrap" />
-            <Border Style="{StaticResource StatCard}">
-                <StackPanel Spacing="14">
-                    <StackPanel Spacing="2">
-                        <TextBlock Text="Application" Style="{StaticResource CaptionTextBlockStyle}" />
-                        <TextBlock x:Name="NameText" Style="{StaticResource BodyTextBlockStyle}" />
+            <StackPanel Spacing="14">
+                <TextBlock Style="{StaticResource TitleTextBlockStyle}" Text="About" />
+
+                <Border Style="{StaticResource StatCard}">
+                    <StackPanel Orientation="Horizontal" Spacing="16">
+                        <Border
+                            Width="52"
+                            Height="52"
+                            CornerRadius="12"
+                            VerticalAlignment="Center"
+                            Background="{ThemeResource SubtleFillColorSecondaryBrush}">
+                            <FontIcon
+                                Glyph="&#xE7F4;"
+                                FontSize="24"
+                                Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center" />
+                        </Border>
+                        <StackPanel Spacing="4" VerticalAlignment="Center">
+                            <TextBlock x:Name="NameText" Style="{StaticResource SubtitleTextBlockStyle}" FontSize="22" />
+                            <TextBlock
+                                x:Name="DescriptionText"
+                                Opacity="0.8"
+                                Style="{StaticResource BodyTextBlockStyle}"
+                                TextWrapping="Wrap" />
+                        </StackPanel>
                     </StackPanel>
-                    <StackPanel Spacing="2">
-                        <TextBlock Text="Version" Style="{StaticResource CaptionTextBlockStyle}" />
-                        <TextBlock x:Name="VersionText" Style="{StaticResource BodyTextBlockStyle}" />
+                </Border>
+
+                <Grid ColumnSpacing="12" RowSpacing="12">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+
+                    <Border Grid.Column="0" Style="{StaticResource StatCard}">
+                        <StackPanel Spacing="12">
+                            <StackPanel Orientation="Horizontal" Spacing="10">
+                                <Border
+                                    Width="34"
+                                    Height="34"
+                                    CornerRadius="8"
+                                    Background="{ThemeResource SubtleFillColorSecondaryBrush}">
+                                    <FontIcon
+                                        Glyph="&#xE950;"
+                                        FontSize="16"
+                                        Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
+                                        HorizontalAlignment="Center"
+                                        VerticalAlignment="Center" />
+                                </Border>
+                                <TextBlock Text="Build &amp; Runtime" Style="{StaticResource SubtitleTextBlockStyle}" FontSize="18" VerticalAlignment="Center" />
+                            </StackPanel>
+
+                            <Grid ColumnSpacing="16" RowSpacing="12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+
+                                <StackPanel Grid.Row="0" Grid.Column="0" Spacing="2">
+                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                        <FontIcon Glyph="&#xE946;" FontSize="12" Opacity="0.7" VerticalAlignment="Center" />
+                                        <TextBlock Text="Version" Opacity="0.75" Style="{StaticResource CaptionTextBlockStyle}" VerticalAlignment="Center" />
+                                    </StackPanel>
+                                    <TextBlock x:Name="VersionText" FontWeight="SemiBold" Style="{StaticResource BodyTextBlockStyle}" />
+                                </StackPanel>
+
+                                <StackPanel Grid.Row="0" Grid.Column="1" Spacing="2">
+                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                        <FontIcon Glyph="&#xE8A5;" FontSize="12" Opacity="0.7" VerticalAlignment="Center" />
+                                        <TextBlock Text="File version" Opacity="0.75" Style="{StaticResource CaptionTextBlockStyle}" VerticalAlignment="Center" />
+                                    </StackPanel>
+                                    <TextBlock x:Name="FileVersionText" FontWeight="SemiBold" Style="{StaticResource BodyTextBlockStyle}" />
+                                </StackPanel>
+
+                                <Border Grid.Row="1" Grid.ColumnSpan="2" Height="1" Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
+
+                                <StackPanel Grid.Row="2" Grid.ColumnSpan="2" Spacing="2">
+                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                        <FontIcon Glyph="&#xE950;" FontSize="12" Opacity="0.7" VerticalAlignment="Center" />
+                                        <TextBlock Text="Architecture" Opacity="0.75" Style="{StaticResource CaptionTextBlockStyle}" VerticalAlignment="Center" />
+                                    </StackPanel>
+                                    <TextBlock x:Name="ArchitectureText" FontWeight="SemiBold" Style="{StaticResource BodyTextBlockStyle}" />
+                                </StackPanel>
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+
+                    <Border Grid.Column="1" Style="{StaticResource StatCard}">
+                        <StackPanel Spacing="12">
+                            <StackPanel Orientation="Horizontal" Spacing="10">
+                                <Border
+                                    Width="34"
+                                    Height="34"
+                                    CornerRadius="8"
+                                    Background="{ThemeResource SubtleFillColorSecondaryBrush}">
+                                    <FontIcon
+                                        Glyph="&#xE77B;"
+                                        FontSize="16"
+                                        Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
+                                        HorizontalAlignment="Center"
+                                        VerticalAlignment="Center" />
+                                </Border>
+                                <TextBlock Text="Author &amp; License" Style="{StaticResource SubtitleTextBlockStyle}" FontSize="18" VerticalAlignment="Center" />
+                            </StackPanel>
+
+                            <Grid ColumnSpacing="16" RowSpacing="12">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+
+                                <StackPanel Grid.Row="0" Grid.Column="0" Spacing="2">
+                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                        <FontIcon Glyph="&#xE77B;" FontSize="12" Opacity="0.7" VerticalAlignment="Center" />
+                                        <TextBlock Text="Author" Opacity="0.75" Style="{StaticResource CaptionTextBlockStyle}" VerticalAlignment="Center" />
+                                    </StackPanel>
+                                    <TextBlock x:Name="AuthorText" FontWeight="SemiBold" Style="{StaticResource BodyTextBlockStyle}" />
+                                </StackPanel>
+
+                                <StackPanel Grid.Row="0" Grid.Column="1" Spacing="2">
+                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                        <FontIcon Glyph="&#xE73E;" FontSize="12" Opacity="0.7" VerticalAlignment="Center" />
+                                        <TextBlock Text="License" Opacity="0.75" Style="{StaticResource CaptionTextBlockStyle}" VerticalAlignment="Center" />
+                                    </StackPanel>
+                                    <TextBlock Text="MIT" FontWeight="SemiBold" Style="{StaticResource BodyTextBlockStyle}" />
+                                </StackPanel>
+
+                                <Border Grid.Row="1" Grid.ColumnSpan="2" Height="1" Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
+
+                                <StackPanel Grid.Row="2" Grid.ColumnSpan="2" Spacing="2">
+                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                        <FontIcon Glyph="&#xE946;" FontSize="12" Opacity="0.7" VerticalAlignment="Center" />
+                                        <TextBlock Text="Copyright" Opacity="0.75" Style="{StaticResource CaptionTextBlockStyle}" VerticalAlignment="Center" />
+                                    </StackPanel>
+                                    <TextBlock x:Name="CopyrightText" Style="{StaticResource BodyTextBlockStyle}" TextWrapping="Wrap" />
+                                </StackPanel>
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+                </Grid>
+
+                <Border Style="{StaticResource StatCard}">
+                    <StackPanel Spacing="6">
+                        <StackPanel Orientation="Horizontal" Spacing="8">
+                            <FontIcon Glyph="&#xE756;" FontSize="14" Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}" VerticalAlignment="Center" />
+                            <TextBlock Text="Executable path" FontWeight="SemiBold" Style="{StaticResource CaptionTextBlockStyle}" VerticalAlignment="Center" />
+                        </StackPanel>
+                        <TextBlock x:Name="ProgramText" FontFamily="Consolas" Opacity="0.85" Style="{StaticResource CaptionTextBlockStyle}" TextWrapping="Wrap" IsTextSelectionEnabled="True" />
                     </StackPanel>
-                    <StackPanel Spacing="2">
-                        <TextBlock Text="File version" Style="{StaticResource CaptionTextBlockStyle}" />
-                        <TextBlock x:Name="FileVersionText" Style="{StaticResource BodyTextBlockStyle}" />
-                    </StackPanel>
-                    <StackPanel Spacing="2">
-                        <TextBlock Text="Author" Style="{StaticResource CaptionTextBlockStyle}" />
-                        <TextBlock x:Name="AuthorText" Style="{StaticResource BodyTextBlockStyle}" />
-                    </StackPanel>
-                    <StackPanel Spacing="2">
-                        <TextBlock Text="Copyright" Style="{StaticResource CaptionTextBlockStyle}" />
-                        <TextBlock x:Name="CopyrightText" Style="{StaticResource BodyTextBlockStyle}" TextWrapping="Wrap" />
-                    </StackPanel>
-                    <StackPanel Spacing="2">
-                        <TextBlock Text="License" Style="{StaticResource CaptionTextBlockStyle}" />
-                        <TextBlock Text="MIT" Style="{StaticResource BodyTextBlockStyle}" />
-                    </StackPanel>
-                    <StackPanel Spacing="2">
-                        <TextBlock Text="Architecture" Style="{StaticResource CaptionTextBlockStyle}" />
-                        <TextBlock x:Name="ArchitectureText" Style="{StaticResource BodyTextBlockStyle}" />
-                    </StackPanel>
-                    <StackPanel Spacing="2">
-                        <TextBlock Text="Program" Style="{StaticResource CaptionTextBlockStyle}" />
-                        <TextBlock x:Name="ProgramText" Style="{StaticResource BodyTextBlockStyle}" TextWrapping="Wrap" IsTextSelectionEnabled="True" />
-                    </StackPanel>
-                </StackPanel>
-            </Border>
-        </StackPanel>
+                </Border>
+            </StackPanel>
         </ScrollViewer>
     </Grid>
 </Page>

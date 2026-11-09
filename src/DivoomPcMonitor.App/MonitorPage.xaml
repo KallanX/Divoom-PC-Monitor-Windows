@@ -29,53 +29,179 @@
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
                 </Grid.ColumnDefinitions>
-                <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="Auto" />
-                </Grid.RowDefinitions>
-                <Border Grid.Row="0" Grid.Column="0" Style="{StaticResource StatCard}">
-                    <StackPanel Spacing="4">
-                        <TextBlock Text="CPU" Style="{StaticResource CaptionTextBlockStyle}" />
-                        <TextBlock x:Name="CpuValue" Text="--" Style="{StaticResource StatValue}" />
+
+                <Border Grid.Column="0" Style="{StaticResource StatCard}">
+                    <StackPanel Spacing="12">
+                        <StackPanel Orientation="Horizontal" Spacing="10">
+                            <Border
+                                Width="34"
+                                Height="34"
+                                CornerRadius="8"
+                                Background="{ThemeResource SubtleFillColorSecondaryBrush}">
+                                <FontIcon
+                                    Glyph="&#xE950;"
+                                    FontSize="16"
+                                    Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center" />
+                            </Border>
+                            <TextBlock Text="CPU" Style="{StaticResource SubtitleTextBlockStyle}" FontSize="18" VerticalAlignment="Center" />
+                        </StackPanel>
+
+                        <StackPanel Spacing="2">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <FontIcon Glyph="&#xEC4A;" FontSize="12" Opacity="0.7" VerticalAlignment="Center" />
+                                <TextBlock Text="Utilization" Opacity="0.75" Style="{StaticResource CaptionTextBlockStyle}" VerticalAlignment="Center" />
+                            </StackPanel>
+                            <TextBlock x:Name="CpuValue" Text="--" Style="{StaticResource StatValue}" />
+                        </StackPanel>
+
+                        <Border Height="1" Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
+
+                        <StackPanel Spacing="2">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <FontIcon Glyph="&#xE9CA;" FontSize="12" Opacity="0.7" VerticalAlignment="Center" />
+                                <TextBlock Text="Temperature" Opacity="0.75" Style="{StaticResource CaptionTextBlockStyle}" VerticalAlignment="Center" />
+                            </StackPanel>
+                            <TextBlock x:Name="CpuTempValue" Text="--" Style="{StaticResource StatValue}" />
+                        </StackPanel>
                     </StackPanel>
                 </Border>
-                <Border Grid.Row="0" Grid.Column="1" Style="{StaticResource StatCard}">
-                    <StackPanel Spacing="4">
-                        <TextBlock Text="GPU" Style="{StaticResource CaptionTextBlockStyle}" />
-                        <TextBlock x:Name="GpuValue" Text="--" Style="{StaticResource StatValue}" />
+
+                <Border Grid.Column="1" Style="{StaticResource StatCard}">
+                    <StackPanel Spacing="12">
+                        <StackPanel Orientation="Horizontal" Spacing="10">
+                            <Border
+                                Width="34"
+                                Height="34"
+                                CornerRadius="8"
+                                Background="{ThemeResource SubtleFillColorSecondaryBrush}">
+                                <FontIcon
+                                    Glyph="&#xE7F4;"
+                                    FontSize="16"
+                                    Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center" />
+                            </Border>
+                            <TextBlock Text="GPU" Style="{StaticResource SubtitleTextBlockStyle}" FontSize="18" VerticalAlignment="Center" />
+                        </StackPanel>
+
+                        <StackPanel Spacing="2">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <FontIcon Glyph="&#xEC4A;" FontSize="12" Opacity="0.7" VerticalAlignment="Center" />
+                                <TextBlock Text="Utilization" Opacity="0.75" Style="{StaticResource CaptionTextBlockStyle}" VerticalAlignment="Center" />
+                            </StackPanel>
+                            <TextBlock x:Name="GpuValue" Text="--" Style="{StaticResource StatValue}" />
+                        </StackPanel>
+
+                        <Border Height="1" Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
+
+                        <StackPanel Spacing="2">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <FontIcon Glyph="&#xE9CA;" FontSize="12" Opacity="0.7" VerticalAlignment="Center" />
+                                <TextBlock Text="Temperature" Opacity="0.75" Style="{StaticResource CaptionTextBlockStyle}" VerticalAlignment="Center" />
+                            </StackPanel>
+                            <TextBlock x:Name="GpuTempValue" Text="--" Style="{StaticResource StatValue}" />
+                        </StackPanel>
                     </StackPanel>
                 </Border>
-                <Border Grid.Row="0" Grid.Column="2" Style="{StaticResource StatCard}">
-                    <StackPanel Spacing="4">
-                        <TextBlock Text="CPU temperature" Style="{StaticResource CaptionTextBlockStyle}" />
-                        <TextBlock x:Name="CpuTempValue" Text="--" Style="{StaticResource StatValue}" />
+
+                <Border Grid.Column="2" Style="{StaticResource StatCard}">
+                    <StackPanel Spacing="12">
+                        <StackPanel Orientation="Horizontal" Spacing="10">
+                            <Border
+                                Width="34"
+                                Height="34"
+                                CornerRadius="8"
+                                Background="{ThemeResource SubtleFillColorSecondaryBrush}">
+                                <FontIcon
+                                    Glyph="&#xE964;"
+                                    FontSize="16"
+                                    Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center" />
+                            </Border>
+                            <TextBlock Text="RAM" Style="{StaticResource SubtitleTextBlockStyle}" FontSize="18" VerticalAlignment="Center" />
+                        </StackPanel>
+
+                        <StackPanel Spacing="2">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <FontIcon Glyph="&#xEC4A;" FontSize="12" Opacity="0.7" VerticalAlignment="Center" />
+                                <TextBlock Text="Usage" Opacity="0.75" Style="{StaticResource CaptionTextBlockStyle}" VerticalAlignment="Center" />
+                            </StackPanel>
+                            <TextBlock x:Name="MemoryValue" Text="--" Style="{StaticResource StatValue}" />
+                        </StackPanel>
+
+                        <Border Height="1" Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
+
+                        <StackPanel Spacing="2">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <FontIcon Glyph="&#xE9D9;" FontSize="12" Opacity="0.7" VerticalAlignment="Center" />
+                                <TextBlock Text="Memory pool" Opacity="0.75" Style="{StaticResource CaptionTextBlockStyle}" VerticalAlignment="Center" />
+                            </StackPanel>
+                            <TextBlock Text="System" Style="{StaticResource SubtitleTextBlockStyle}" FontSize="20" Opacity="0.85" />
+                        </StackPanel>
                     </StackPanel>
                 </Border>
-                <Border Grid.Row="1" Grid.Column="0" Style="{StaticResource StatCard}">
-                    <StackPanel Spacing="4">
-                        <TextBlock Text="GPU temperature" Style="{StaticResource CaptionTextBlockStyle}" />
-                        <TextBlock x:Name="GpuTempValue" Text="--" Style="{StaticResource StatValue}" />
-                    </StackPanel>
-                </Border>
-                <Border Grid.Row="1" Grid.Column="1" Style="{StaticResource StatCard}">
-                    <StackPanel Spacing="4">
-                        <TextBlock Text="Memory" Style="{StaticResource CaptionTextBlockStyle}" />
-                        <TextBlock x:Name="MemoryValue" Text="--" Style="{StaticResource StatValue}" />
-                    </StackPanel>
-                </Border>
-                <Border Grid.Row="1" Grid.Column="2" Style="{StaticResource StatCard}">
-                    <StackPanel Spacing="4">
-                        <TextBlock Text="Disk" Style="{StaticResource CaptionTextBlockStyle}" />
-                        <TextBlock x:Name="DiskValue" Text="--" Style="{StaticResource StatValue}" />
-                        <TextBlock x:Name="DiskName" Opacity="0.7" Style="{StaticResource CaptionTextBlockStyle}" />
+
+                <Border Grid.Column="3" Style="{StaticResource StatCard}">
+                    <StackPanel Spacing="12">
+                        <StackPanel Orientation="Horizontal" Spacing="10">
+                            <Border
+                                Width="34"
+                                Height="34"
+                                CornerRadius="8"
+                                Background="{ThemeResource SubtleFillColorSecondaryBrush}">
+                                <FontIcon
+                                    Glyph="&#xEDA2;"
+                                    FontSize="16"
+                                    Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
+                                    HorizontalAlignment="Center"
+                                    VerticalAlignment="Center" />
+                            </Border>
+                            <TextBlock Text="Disk" Style="{StaticResource SubtitleTextBlockStyle}" FontSize="18" VerticalAlignment="Center" />
+                        </StackPanel>
+
+                        <StackPanel Spacing="2">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <FontIcon Glyph="&#xEC4A;" FontSize="12" Opacity="0.7" VerticalAlignment="Center" />
+                                <TextBlock Text="Usage" Opacity="0.75" Style="{StaticResource CaptionTextBlockStyle}" VerticalAlignment="Center" />
+                            </StackPanel>
+                            <TextBlock x:Name="DiskValue" Text="--" Style="{StaticResource StatValue}" />
+                        </StackPanel>
+
+                        <Border Height="1" Background="{ThemeResource DividerStrokeColorDefaultBrush}" />
+
+                        <StackPanel Spacing="2">
+                            <StackPanel Orientation="Horizontal" Spacing="6">
+                                <FontIcon Glyph="&#xEDA2;" FontSize="12" Opacity="0.7" VerticalAlignment="Center" />
+                                <TextBlock Text="Active drive" Opacity="0.75" Style="{StaticResource CaptionTextBlockStyle}" VerticalAlignment="Center" />
+                            </StackPanel>
+                            <TextBlock x:Name="DiskName" Text="--" Style="{StaticResource SubtitleTextBlockStyle}" FontSize="20" Opacity="0.85" />
+                        </StackPanel>
                     </StackPanel>
                 </Border>
             </Grid>
 
             <Border Style="{StaticResource StatCard}">
                 <StackPanel Spacing="14">
-                    <TextBlock Text="Schedule" Style="{StaticResource SubtitleTextBlockStyle}" />
+                    <StackPanel Orientation="Horizontal" Spacing="10">
+                        <Border
+                            Width="34"
+                            Height="34"
+                            CornerRadius="8"
+                            Background="{ThemeResource SubtleFillColorSecondaryBrush}">
+                            <FontIcon
+                                Glyph="&#xE823;"
+                                FontSize="16"
+                                Foreground="{ThemeResource AccentTextFillColorPrimaryBrush}"
+                                HorizontalAlignment="Center"
+                                VerticalAlignment="Center" />
+                        </Border>
+                        <TextBlock Text="Schedule" Style="{StaticResource SubtitleTextBlockStyle}" FontSize="18" VerticalAlignment="Center" />
+                    </StackPanel>
                     <NumberBox
                         x:Name="IntervalBox"
                         Header="Seconds to wait after each update"

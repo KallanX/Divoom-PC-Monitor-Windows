@@ -8,6 +8,7 @@ using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Media.Animation;
 using WinRT.Interop;
 
 namespace DivoomPcMonitor;
@@ -17,6 +18,8 @@ public sealed partial class MainWindow : Window
     private bool _quit;
     private bool _navigating;
     private bool _trayDisposed;
+    private int _currentNavIndex = -1;
+    private Storyboard? _navStoryboard;
 
     public ICommand OpenCommand { get; }
 
@@ -179,21 +182,64 @@ public sealed partial class MainWindow : Window
                 }
             }
 
-            var page = tag switch
+            var (page, nextIndex) = tag switch
             {
-                "setup" => typeof(SetupPage),
-                "log" => typeof(LogPage),
-                "about" => typeof(AboutPage),
-                _ => typeof(MonitorPage),
+                "setup" => (typeof(SetupPage), 1),
+                "log" => (typeof(LogPage), 2),
+                "about" => (typeof(AboutPage), 3),
+                _ => (typeof(MonitorPage), 0),
             };
             if (RootFrame.CurrentSourcePageType != page)
             {
-                RootFrame.Navigate(page);
+                var previousIndex = _currentNavIndex;
+                _currentNavIndex = nextIndex;
+                RootFrame.Navigate(page, null, new SuppressNavigationTransitionInfo());
+                if (previousIndex >= 0 && previousIndex != nextIndex)
+                {
+                    AnimatePageTransition(fromTop: nextIndex < previousIndex);
+                }
             }
         }
         finally
         {
             _navigating = false;
         }
+    }
+
+    private void AnimatePageTransition(bool fromTop)
+    {
+        _navStoryboard?.Stop();
+        var startY = fromTop ? -28.0 : 28.0;
+        RootFrame.Opacity = 0;
+        FrameTransform.Y = startY;
+
+        var duration = new Duration(TimeSpan.FromMilliseconds(220));
+        var easing = new CubicEase { EasingMode = EasingMode.EaseOut };
+
+        var slide = new DoubleAnimation
+        {
+            From = startY,
+            To = 0,
+            Duration = duration,
+            EasingFunction = easing,
+        };
+        Storyboard.SetTarget(slide, FrameTransform);
+        Storyboard.SetTargetProperty(slide, "Y");
+
+        var fade = new DoubleAnimation
+        {
+            From = 0,
+            To = 1,
+            Duration = duration,
+            EasingFunction = easing,
+        };
+        Storyboard.SetTarget(fade, RootFrame);
+        Storyboard.SetTargetProperty(fade, "Opacity");
+
+        var storyboard = new Storyboard();
+        storyboard.Children.Add(slide);
+        storyboard.Children.Add(fade);
+        _navStoryboard = storyboard;
+        storyboard.Begin();
     }
 }
