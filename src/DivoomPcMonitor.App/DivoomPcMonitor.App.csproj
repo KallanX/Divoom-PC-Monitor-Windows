@@ -21,12 +21,23 @@
     <DebugSymbols>true</DebugSymbols>
     <ApplicationIcon>Assets\AppIcon.ico</ApplicationIcon>
     <Description>Send PC usage to a Divoom Times Gate or Pixoo64.</Description>
+    <!-- About reads these. The WinUI assembly version is not the Windows App SDK package version. -->
+    <WindowsAppSdkPackageVersion>2.6.5</WindowsAppSdkPackageVersion>
+    <WindowsSdkBuildToolsVersion>10.0.28000.2957</WindowsSdkBuildToolsVersion>
   </PropertyGroup>
   <ItemGroup>
-    <PackageReference Include="Microsoft.WindowsAppSDK" Version="2.6.5" />
-    <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.28000.2957" />
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="$(WindowsAppSdkPackageVersion)" />
+    <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="$(WindowsSdkBuildToolsVersion)" />
     <PackageReference Include="H.NotifyIcon.WinUI" Version="2.4.1" />
   </ItemGroup>
+  <!-- NETCoreSdkVersion is set by the SDK targets, after the project file is read. -->
+  <Target Name="AddDeveloperVersionMetadata" BeforeTargets="GetAssemblyAttributes">
+    <ItemGroup>
+      <AssemblyMetadata Include="NetSdkVersion" Value="$(NETCoreSdkVersion)" />
+      <AssemblyMetadata Include="WindowsAppSdkVersion" Value="$(WindowsAppSdkPackageVersion)" />
+      <AssemblyMetadata Include="WindowsSdkBuildToolsVersion" Value="$(WindowsSdkBuildToolsVersion)" />
+    </ItemGroup>
+  </Target>
   <ItemGroup>
     <ProjectReference Include="..\DivoomPcMonitor.Core\DivoomPcMonitor.Core.csproj" />
   </ItemGroup>
