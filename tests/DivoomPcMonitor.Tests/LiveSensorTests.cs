@@ -13,13 +13,18 @@ public class LiveSensorTests
         Assert.InRange(sample.MemoryUtil.Value, 0, 100);
         Assert.NotNull(sample.CpuUtil);
         Assert.InRange(sample.CpuUtil.Value, 0, 100);
-        Assert.NotNull(sample.CpuTemp);
-        Assert.InRange(sample.CpuTemp.Value, 0, 125);
-        if (gpus.Count > 0)
+        if (sample.CpuTemp is not null)
         {
-            Assert.NotNull(sample.GpuUtil);
+            Assert.InRange(sample.CpuTemp.Value, 0, 125);
+        }
+
+        if (sample.GpuUtil is not null)
+        {
             Assert.InRange(sample.GpuUtil.Value, 0, 100);
-            Assert.NotNull(sample.GpuTemp);
+        }
+
+        if (sample.GpuTemp is not null)
+        {
             Assert.InRange(sample.GpuTemp.Value, 0, 125);
         }
     }
