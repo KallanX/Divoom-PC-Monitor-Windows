@@ -1,0 +1,43 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{9EE468E7-F71A-4E84-90EC-D28A325B86E4}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DivoomPcMonitor.App", "src\DivoomPcMonitor.App\DivoomPcMonitor.App.csproj", "{E17D3991-5BE8-4C16-AA36-96A5079BA4EE}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DivoomPcMonitor.Core", "src\DivoomPcMonitor.Core\DivoomPcMonitor.Core.csproj", "{642E2490-6983-4FC5-A980-4B1DB685E0E3}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{F46D87B8-0859-4AF5-BCE2-F2B9D494147D}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "DivoomPcMonitor.Tests", "tests\DivoomPcMonitor.Tests\DivoomPcMonitor.Tests.csproj", "{48921D81-0410-4540-AC44-AA26198A905B}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{E17D3991-5BE8-4C16-AA36-96A5079BA4EE}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{E17D3991-5BE8-4C16-AA36-96A5079BA4EE}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{E17D3991-5BE8-4C16-AA36-96A5079BA4EE}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{E17D3991-5BE8-4C16-AA36-96A5079BA4EE}.Release|Any CPU.Build.0 = Release|Any CPU
+		{642E2490-6983-4FC5-A980-4B1DB685E0E3}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{642E2490-6983-4FC5-A980-4B1DB685E0E3}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{642E2490-6983-4FC5-A980-4B1DB685E0E3}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{642E2490-6983-4FC5-A980-4B1DB685E0E3}.Release|Any CPU.Build.0 = Release|Any CPU
+		{48921D81-0410-4540-AC44-AA26198A905B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{48921D81-0410-4540-AC44-AA26198A905B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{48921D81-0410-4540-AC44-AA26198A905B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{48921D81-0410-4540-AC44-AA26198A905B}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{E17D3991-5BE8-4C16-AA36-96A5079BA4EE} = {9EE468E7-F71A-4E84-90EC-D28A325B86E4}
+		{642E2490-6983-4FC5-A980-4B1DB685E0E3} = {9EE468E7-F71A-4E84-90EC-D28A325B86E4}
+		{48921D81-0410-4540-AC44-AA26198A905B} = {F46D87B8-0859-4AF5-BCE2-F2B9D494147D}
+	EndGlobalSection
+EndGlobal

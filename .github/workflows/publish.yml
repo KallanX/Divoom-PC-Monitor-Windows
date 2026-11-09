@@ -1,16 +1,19 @@
-name: Publish
+name: CI
 
 on:
   push:
+    branches: [main]
     tags:
-      - "v*"
+      - "v[0-9]+.[0-9]+.[0-9]+"
+      - "v[0-9]+.[0-9]+.[0-9]+-*"
+  pull_request:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   test:
-    name: Test
+    name: Build and test
     runs-on: windows-latest
     steps:
       - name: Checkout
@@ -21,12 +24,19 @@ jobs:
         with:
           global-json-file: global.json
 
+      - name: Build win-x64
+        run: dotnet build src/DivoomPcMonitor.App/DivoomPcMonitor.App.csproj -c Release -r win-x64 --nologo
+
+      - name: Build win-arm64
+        run: dotnet build src/DivoomPcMonitor.App/DivoomPcMonitor.App.csproj -c Release -r win-arm64 --nologo
+
       - name: Test
         run: dotnet test tests/DivoomPcMonitor.Tests/DivoomPcMonitor.Tests.csproj -c Release --nologo
 
   publish:
     name: Publish ${{ matrix.rid }}
     needs: test
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: windows-latest
     strategy:
       fail-fast: false
@@ -53,7 +63,7 @@ jobs:
           if ($version -notmatch "^\d+\.\d+\.\d+([-+].*)?$") {
             throw "Tag '$tag' is not a version like v0.1.0."
           }
-          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8NoBOM -Append
 
       - name: Publish
         shell: pwsh
@@ -69,7 +79,10 @@ jobs:
   release:
     name: Attach the builds to the tag
     needs: publish
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: windows-latest
+    permissions:
+      contents: write
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -91,12 +104,20 @@ jobs:
         run: |
           $PSNativeCommandUseErrorActionPreference = $false
           $tag = "${{ github.ref_name }}"
-          $zips = @(Get-ChildItem -Path release -Filter *.zip)
+          $zips = @(Get-ChildItem -Path release -Filter *.zip | Sort-Object Name)
           if ($zips.Count -lt 2) { throw "Expected both Windows zips. Found $($zips.Count)." }
+          $utf8 = New-Object System.Text.UTF8Encoding $false
+          $sums = Join-Path (Resolve-Path release) "SHA256SUMS.txt"
+          $lines = foreach ($zip in $zips) {
+            $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $zip.FullName).Hash.ToLowerInvariant()
+            "{0}  {1}" -f $hash, $zip.Name
+          }
+          [System.IO.File]::WriteAllText($sums, (($lines -join "`n") + "`n"), $utf8)
+          $files = @($zips.FullName) + $sums
           gh release view $tag --repo $env:GH_REPO --json tagName
           if ($LASTEXITCODE -eq 0) {
-            gh release upload $tag $zips.FullName --repo $env:GH_REPO --clobber
+            gh release upload $tag @files --repo $env:GH_REPO --clobber
           } else {
-            gh release create $tag $zips.FullName --repo $env:GH_REPO --title $tag --generate-notes
+            gh release create $tag @files --repo $env:GH_REPO --title $tag --generate-notes
           }
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

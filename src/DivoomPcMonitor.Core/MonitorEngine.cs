@@ -83,7 +83,7 @@ public sealed class MonitorEngine : IAsyncDisposable
                     var raw = await _sensors.MeasureAsync(selection.Gpu, config.HardDrive, cancellationToken).ConfigureAwait(false);
                     if (raw.GpuUtil is null)
                     {
-                        _hardware.Invalidate();
+                        _hardware.NoteMissingUtil();
                     }
                     if (raw.CpuTemp is null)
                     {
@@ -179,11 +179,19 @@ public sealed class MonitorEngine : IAsyncDisposable
     {
         private string? _key;
         private HardwareSelection? _value;
+        private long _nextRefresh;
 
-        public void Invalidate()
+        public void NoteMissingUtil()
         {
+            var now = Environment.TickCount64;
+            if (now < _nextRefresh)
+            {
+                return;
+            }
+
             _key = null;
             _value = null;
+            _nextRefresh = now + 60_000;
         }
 
         public HardwareSelection Resolve(MonitorConfig config, MonitorLog log)

@@ -87,7 +87,7 @@ public static class WindowsHardware
             {
                 var type = ToInt(item["DriveType"]);
                 var id = item["DeviceID"]?.ToString() ?? "";
-                if ((type != 2 && type != 3) || id.Length == 0)
+                if (type != 3 || id.Length == 0)
                 {
                     continue;
                 }
@@ -108,7 +108,7 @@ public static class WindowsHardware
     public static Dictionary<string, DiskSample> DiskSnapshot()
     {
         var snapshot = new Dictionary<string, DiskSample>(StringComparer.OrdinalIgnoreCase);
-        using var searcher = new ManagementObjectSearcher("SELECT Name, PercentIdleTime, Timestamp_Sys100NS FROM Win32_PerfRawData_PerfDisk_LogicalDisk");
+        using var searcher = new ManagementObjectSearcher("SELECT Name, PercentIdleTime, PercentIdleTime_Base, Timestamp_Sys100NS FROM Win32_PerfRawData_PerfDisk_LogicalDisk");
         using var results = searcher.Get();
         foreach (ManagementObject item in results)
         {
@@ -124,6 +124,7 @@ public static class WindowsHardware
                 {
                     Idle = ToUInt64(item["PercentIdleTime"]),
                     Timestamp = ToUInt64(item["Timestamp_Sys100NS"]),
+                    IdleBase = ToUInt64(item["PercentIdleTime_Base"]),
                 };
             }
         }
@@ -241,6 +242,7 @@ public static class WindowsHardware
     private static Dictionary<string, string> ReadDisplayPci()
     {
         var map = new Dictionary<string, string>(StringComparer.Ordinal);
+        var found = new List<(string Name, string Pci)>();
         var classGuid = DisplayClass;
         var deviceSet = SetupDiGetClassDevs(ref classGuid, null, IntPtr.Zero, 0x02);
         if (deviceSet == IntPtr.Zero || deviceSet == new IntPtr(-1))
@@ -293,18 +295,28 @@ public static class WindowsHardware
 
                 if (!string.IsNullOrWhiteSpace(friendlyName))
                 {
-                    map.TryAdd(friendlyName, pci);
+                    found.Add((friendlyName, pci));
                 }
 
-                if (!string.IsNullOrWhiteSpace(deviceDesc))
+                if (!string.IsNullOrWhiteSpace(deviceDesc)
+                    && !string.Equals(deviceDesc, friendlyName, StringComparison.Ordinal))
                 {
-                    map.TryAdd(deviceDesc, pci);
+                    found.Add((deviceDesc, pci));
                 }
             }
         }
         finally
         {
             SetupDiDestroyDeviceInfoList(deviceSet);
+        }
+
+        foreach (var group in found.GroupBy(static item => item.Name, StringComparer.Ordinal))
+        {
+            var addresses = group.Select(static item => item.Pci).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+            if (addresses.Length == 1)
+            {
+                map[group.Key] = addresses[0];
+            }
         }
 
         return map;
@@ -446,6 +458,25 @@ public static class WindowsHardware
         return (end >= 0 ? text[..end] : text).Trim();
     }
 
+    internal const int AdapterPerfTemperatureOffset = 56;
+
+    internal static int? DecodeAdapterTemperature(ReadOnlySpan<byte> buffer)
+    {
+        if (buffer.Length < AdapterPerfTemperatureOffset + sizeof(uint))
+        {
+            return null;
+        }
+
+        var rawTemp = System.Buffers.Binary.BinaryPrimitives.ReadUInt32LittleEndian(buffer[AdapterPerfTemperatureOffset..]);
+        var celsius = rawTemp switch
+        {
+            >= 150 and <= 1250 => rawTemp / 10.0,
+            >= 15 and <= 125 => (double)rawTemp,
+            _ => -1.0,
+        };
+        return celsius < 0 ? null : HardwareMath.VendorCelsius(celsius);
+    }
+
     public static int? ReadD3dkmtGpuTemp(string? luid)
     {
         var clean = (luid ?? "").Trim().ToLowerInvariant();
@@ -499,14 +530,9 @@ public static class WindowsHardware
                 return null;
             }
 
-            var rawTemp = unchecked((uint)Marshal.ReadInt32(perfBuffer, 52));
-            var celsius = rawTemp switch
-            {
-                >= 150 and <= 1250 => rawTemp / 10.0,
-                >= 15 and <= 125 => (double)rawTemp,
-                _ => -1.0,
-            };
-            return celsius < 0 ? null : HardwareMath.VendorCelsius(celsius);
+            var managed = new byte[perfDataSize];
+            Marshal.Copy(perfBuffer, managed, 0, perfDataSize);
+            return DecodeAdapterTemperature(managed);
         }
         catch (Exception)
         {

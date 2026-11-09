@@ -54,6 +54,7 @@ public sealed class DiskSample
 {
     public ulong Idle { get; init; }
     public ulong Timestamp { get; init; }
+    public ulong IdleBase { get; init; }
 }
 
 public sealed class EngineSample
@@ -100,6 +101,7 @@ public static class HardwareMath
     private static readonly Regex EnginePattern = new(
         @"luid_(0x[0-9a-f]{8}_0x[0-9a-f]{8})_phys_\d+_eng_\d+_engtype_([a-z0-9]+)",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    private static readonly string[] BusyEngineKinds = ["3d", "compute", "videodecode", "videoencode", "video", "copy"];
     private static readonly Regex CpuZonePattern = new(@"cpu|pkg|soc|core|tdie|tctl|processor|qcom0c58|qcom0c59|qcom0d01|ven_qcom&dev_0c58|ven_qcom&dev_0c59|ven_qcom&dev_0d01", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
     private static readonly Regex GpuZonePattern = new(@"gpu|gfx|adreno|kgsl|video|qcom0c91|ven_qcom&dev_0c91", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
@@ -178,7 +180,39 @@ public static class HardwareMath
             }
         }
 
+        foreach (var gpu in gpus)
+        {
+            if (string.Equals(gpu.Vendor, "Intel", StringComparison.OrdinalIgnoreCase) && IsDiscreteIntel(gpu))
+            {
+                return gpu;
+            }
+        }
+
         return gpus.Count > 0 ? gpus[0] : null;
+    }
+
+    public static bool IsDiscreteIntel(GpuCard gpu)
+    {
+        var name = gpu.Name;
+        if (name.Contains("Arc", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (name.Contains("UHD", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("Iris", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("HD Graphics", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var pci = ShortenPci(gpu.Pci);
+        if (pci.StartsWith("00:02.", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return pci.Length > 0 && !pci.StartsWith("00:", StringComparison.OrdinalIgnoreCase);
     }
 
     public static GpuCard? FromConfig(MonitorConfig config, Action<string>? warn = null)
@@ -264,8 +298,17 @@ public static class HardwareMath
         GpuCard? match = null;
         if (configured.Pci.Length > 0)
         {
-            match = gpus.FirstOrDefault(card =>
-                card.Pci.Length > 0 && string.Equals(ShortenPci(card.Pci), configured.Pci, StringComparison.OrdinalIgnoreCase));
+            var pciMatches = gpus.Where(card =>
+                card.Pci.Length > 0 && string.Equals(ShortenPci(card.Pci), configured.Pci, StringComparison.OrdinalIgnoreCase)).ToList();
+            if (pciMatches.Count == 1)
+            {
+                match = pciMatches[0];
+            }
+            else if (pciMatches.Count > 1 && configured.Luid.Length > 0)
+            {
+                match = pciMatches.FirstOrDefault(card =>
+                    card.Luid.Length > 0 && string.Equals(card.Luid, configured.Luid, StringComparison.OrdinalIgnoreCase));
+            }
         }
 
         if (match is null && configured.Luid.Length > 0)
@@ -464,7 +507,14 @@ public static class HardwareMath
                 continue;
             }
 
-            var timeDelta = (decimal)second.Timestamp - (decimal)first.Timestamp;
+            if (first.Idle == 0 && second.Idle == 0)
+            {
+                continue;
+            }
+
+            var timeDelta = first.IdleBase != 0 || second.IdleBase != 0
+                ? (decimal)second.IdleBase - (decimal)first.IdleBase
+                : (decimal)second.Timestamp - (decimal)first.Timestamp;
             if (timeDelta <= 0)
             {
                 continue;
@@ -533,18 +583,25 @@ public static class HardwareMath
             sums[kind] = sums.TryGetValue(kind, out var existing) ? existing + sampleValue : sampleValue;
         }
 
-        if (!sums.ContainsKey("3d") && !sums.ContainsKey("compute"))
-        {
-            return null;
-        }
-
         var value = 0.0;
-        foreach (var kind in new[] { "3d", "compute" })
+        var tracked = false;
+        foreach (var kind in BusyEngineKinds)
         {
-            if (sums.TryGetValue(kind, out var sum) && sum > value)
+            if (!sums.TryGetValue(kind, out var sum))
+            {
+                continue;
+            }
+
+            tracked = true;
+            if (sum > value)
             {
                 value = sum;
             }
+        }
+
+        if (!tracked)
+        {
+            return null;
         }
 
         if (value < 0)
@@ -645,8 +702,15 @@ public static class HardwareMath
                     Celsius = (int)Math.Round(celsius.Value),
                     Raw = celsius.Value,
                 };
+                var hardwareId = zone.HardwareId ?? "";
+                var gpuNamed = GpuZonePattern.IsMatch(pick.Name) || (hardwareId.Length > 0 && GpuZonePattern.IsMatch(hardwareId));
+                if (!gpu && gpuNamed)
+                {
+                    continue;
+                }
+
                 valid.Add(pick);
-                if (pattern.IsMatch(pick.Name) || (!string.IsNullOrEmpty(zone.HardwareId) && pattern.IsMatch(zone.HardwareId)))
+                if (pattern.IsMatch(pick.Name) || (hardwareId.Length > 0 && pattern.IsMatch(hardwareId)))
                 {
                     named.Add(pick);
                 }
@@ -658,7 +722,7 @@ public static class HardwareMath
         {
             pool = named;
         }
-        else if (gpu)
+        else if (gpu || valid.Count == 0)
         {
             return null;
         }
@@ -732,7 +796,7 @@ public static class HardwareMath
 
         if (name == "Qualcomm" && reading.Temp is null)
         {
-            once?.Invoke("qcom-temp|Qualcomm does not publish GPU temperature on Windows. Utilization comes from the Adreno GPU Engine counters.");
+            once?.Invoke("qcom-temp|Qualcomm GPU temperature was not available from WDDM or an ACPI thermal zone. Utilization comes from the Adreno GPU Engine counters.");
         }
 
         return reading;
@@ -764,11 +828,6 @@ public static class HardwareMath
     public static int? IntelUtil(ulong[]? first, ulong[]? second)
     {
         if (first is null || second is null || first.Length < 2 || second.Length < 2)
-        {
-            return null;
-        }
-
-        if (first[0] == 0 && second[0] == 0)
         {
             return null;
         }

@@ -9,6 +9,8 @@ public sealed class Session
     private MonitorEngine? _engine;
     private CancellationTokenSource? _cancel;
     private DivoomDeviceClient? _device;
+    private Task? _run;
+    private bool _restartAfterStop;
     private int _generation;
     private int _publishPending;
     private string? _cycleError;
@@ -62,17 +64,76 @@ public sealed class Session
 
     public void Start()
     {
-        if (Monitoring)
+        lock (_gate)
         {
-            return;
+            if (_run is { IsCompleted: false })
+            {
+                if (!Monitoring)
+                {
+                    _restartAfterStop = true;
+                }
+
+                return;
+            }
+
+            BeginStart();
         }
 
+        Publish();
+    }
+
+    public void Stop()
+    {
+        CancellationTokenSource? cancel;
+        lock (_gate)
+        {
+            _restartAfterStop = false;
+            Interlocked.Increment(ref _generation);
+            Monitoring = false;
+            _cycleError = null;
+            HasError = false;
+            Status = "Monitor stopped.";
+            cancel = _cancel;
+        }
+
+        Cancel(cancel);
+        Publish();
+    }
+
+    public void Restart()
+    {
+        CancellationTokenSource? cancel;
+        var startNow = false;
+        lock (_gate)
+        {
+            _restartAfterStop = true;
+            Interlocked.Increment(ref _generation);
+            Monitoring = false;
+            _cycleError = null;
+            HasError = false;
+            cancel = _cancel;
+            startNow = _run is null or { IsCompleted: true };
+            if (startNow)
+            {
+                _restartAfterStop = false;
+                if (!BeginStart())
+                {
+                    _restartAfterStop = false;
+                }
+            }
+        }
+
+        Cancel(cancel);
+        Publish();
+    }
+
+    private bool BeginStart()
+    {
         if (!HasConfig || ConfigPath is null)
         {
             Status = "Open Setup to choose the Divoom device.";
             NavigateRequested?.Invoke("setup");
-            Publish();
-            return;
+            return false;
         }
 
         var generation = Interlocked.Increment(ref _generation);
@@ -82,7 +143,7 @@ public sealed class Session
         var engine = new MonitorEngine(sensors, device, log)
         {
             IntervalSeconds = Math.Max(1, Settings.IntervalSeconds),
-            Verbose = true,
+            Verbose = Settings.DebugLog,
         };
         engine.Updated += reading =>
         {
@@ -98,11 +159,11 @@ public sealed class Session
         HasError = false;
         Monitoring = true;
         Status = "Collecting the first sample.";
-        Publish();
 
         var path = ConfigPath;
         var token = cancel.Token;
-        _ = Task.Run(async () =>
+        Task run = null!;
+        run = Task.Run(async () =>
         {
             try
             {
@@ -116,39 +177,50 @@ public sealed class Session
             {
                 device.Dispose();
                 cancel.Dispose();
-                if (generation == Volatile.Read(ref _generation))
+                var restart = false;
+                var publishStop = false;
+                lock (_gate)
                 {
-                    Monitoring = false;
-                    HasError = false;
-                    Status = "Monitor stopped.";
+                    if (ReferenceEquals(_run, run))
+                    {
+                        _run = null;
+                    }
+
+                    if (generation == Volatile.Read(ref _generation))
+                    {
+                        Monitoring = false;
+                        HasError = false;
+                        Status = "Monitor stopped.";
+                        publishStop = true;
+                    }
+
+                    restart = _restartAfterStop;
+                    _restartAfterStop = false;
+                }
+
+                if (restart)
+                {
+                    Start();
+                }
+                else if (publishStop)
+                {
                     Publish();
                 }
             }
         });
+        _run = run;
+        return true;
     }
 
-    public void Stop()
+    private static void Cancel(CancellationTokenSource? cancel)
     {
-        Interlocked.Increment(ref _generation);
-        Monitoring = false;
-        _cycleError = null;
-        HasError = false;
         try
         {
-            _cancel?.Cancel();
+            cancel?.Cancel();
         }
         catch (Exception)
         {
         }
-
-        Status = "Monitor stopped.";
-        Publish();
-    }
-
-    public void Restart()
-    {
-        Stop();
-        Start();
     }
 
     public void SetInterval(int seconds)
@@ -171,6 +243,10 @@ public sealed class Session
         Settings.DebugLog = enabled;
         Settings.Save();
         Log.WriteToFile = enabled;
+        if (_engine is not null)
+        {
+            _engine.Verbose = enabled;
+        }
     }
 
     public void RequestNavigate(string page)

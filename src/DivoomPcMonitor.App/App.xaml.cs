@@ -127,7 +127,8 @@ public partial class App : Application
         InitializeComponent();
         UnhandledException += (_, eventArgs) =>
         {
-            Session.Current.Log.Info("The app hit an error: " + eventArgs.Message);
+            var detail = eventArgs.Exception is null ? eventArgs.Message : eventArgs.Exception.ToString();
+            Session.Current.Log.Info("The app hit an error: " + detail);
             eventArgs.Handled = true;
         };
     }

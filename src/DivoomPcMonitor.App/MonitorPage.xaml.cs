@@ -21,7 +21,7 @@ public sealed partial class MonitorPage : Page
         base.OnNavigatedTo(e);
         _ready = false;
         IntervalBox.Value = Session.Current.Settings.IntervalSeconds;
-        LoginSwitch.IsOn = LoginStartup.IsEnabled();
+        LoginSwitch.IsOn = LoginStartup.IsEnabled(ConfigLocator.ResolveLauncherPath(Environment.ProcessPath));
         DebugSwitch.IsOn = Session.Current.Settings.DebugLog;
         _ready = true;
         Session.Current.Changed += OnChanged;
@@ -144,7 +144,7 @@ public sealed partial class MonitorPage : Page
         {
             Session.Current.Log.Info("Could not update sign-in startup: " + ex.Message);
             _ready = false;
-            LoginSwitch.IsOn = LoginStartup.IsEnabled();
+            LoginSwitch.IsOn = LoginStartup.IsEnabled(path);
             _ready = true;
         }
     }

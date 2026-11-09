@@ -329,9 +329,27 @@ public sealed class WindowsSensorSource : ISensorSource
     }
 }
 
+internal sealed class RetryGate
+{
+    private long _next;
+
+    public bool TryBegin(int cooldownMs = 30_000)
+    {
+        var now = Environment.TickCount64;
+        if (now < Volatile.Read(ref _next))
+        {
+            return false;
+        }
+
+        Volatile.Write(ref _next, now + cooldownMs);
+        return true;
+    }
+}
+
 internal sealed class PdhSession : IDisposable
 {
     private const uint FmtDouble = 0x00000200;
+    private readonly RetryGate _retry = new();
     private IntPtr _query;
     private IntPtr _gpuAll;
     private IntPtr _gpu3d;
@@ -339,20 +357,18 @@ internal sealed class PdhSession : IDisposable
     private IntPtr _thermal;
     private IntPtr _thermalFallback;
     private bool _ready;
-    private bool _tried;
 
     public void EnsureOpen(MonitorLog log)
     {
-        if (_tried)
+        if (_ready || !_retry.TryBegin())
         {
             return;
         }
-
-        _tried = true;
         var status = PdhOpenQuery(IntPtr.Zero, IntPtr.Zero, out _query);
         if (status != 0 || _query == IntPtr.Zero)
         {
             log.WriteOnce("pdh-open", "Windows performance counters could not be opened (status " + status.ToString(CultureInfo.InvariantCulture) + ").");
+            Dispose();
             return;
         }
 
@@ -369,7 +385,6 @@ internal sealed class PdhSession : IDisposable
         {
             log.WriteOnce("pdh-open", "Windows performance counters have no GPU engine or thermal zone data.");
             Dispose();
-            _tried = true;
             return;
         }
 
@@ -424,27 +439,31 @@ internal sealed class PdhSession : IDisposable
         }
 
         var hardwareIds = WindowsHardware.ReadThermalZoneHardwareIds();
-        foreach (var sample in Read(_thermal))
+        var precise = ReadUsable(_thermal, hardwareIds);
+        if (precise.Count > 0)
         {
+            return precise;
+        }
+
+        return ReadUsable(_thermalFallback, hardwareIds);
+    }
+
+    private static List<ThermalZone> ReadUsable(IntPtr counter, IReadOnlyDictionary<string, string> hardwareIds)
+    {
+        var zones = new List<ThermalZone>();
+        foreach (var sample in Read(counter))
+        {
+            if (HardwareMath.ThermalCelsius(sample.CookedValue) is null)
+            {
+                continue;
+            }
+
             zones.Add(new ThermalZone
             {
                 Name = sample.InstanceName,
                 DeciKelvin = sample.CookedValue,
                 HardwareId = hardwareIds.TryGetValue(sample.InstanceName, out var hwid) ? hwid : "",
             });
-        }
-
-        if (zones.Count == 0 && _thermalFallback != IntPtr.Zero)
-        {
-            foreach (var sample in Read(_thermalFallback))
-            {
-                zones.Add(new ThermalZone
-                {
-                    Name = sample.InstanceName,
-                    DeciKelvin = sample.CookedValue,
-                    HardwareId = hardwareIds.TryGetValue(sample.InstanceName, out var hwid) ? hwid : "",
-                });
-            }
         }
 
         return zones;
@@ -487,7 +506,7 @@ internal sealed class PdhSession : IDisposable
         PdhGetFormattedCounterArray(counter, FmtDouble, ref size, out count, IntPtr.Zero);
         for (var attempt = 0; attempt < 3; attempt++)
         {
-            if (size < stride || size > 8_000_000 || count == 0)
+            if (size < stride || size > 8_000_000)
             {
                 return items;
             }
@@ -567,13 +586,13 @@ internal sealed class AmdLibrary : IDisposable
 
     private static readonly AdlAlloc Alloc = static size => size <= 0 ? IntPtr.Zero : Marshal.AllocHGlobal(size);
 
+    private readonly RetryGate _retry = new();
     private IntPtr _module;
     private IntPtr _context;
     private AdlDestroy? _destroy;
     private AdlCount? _count;
     private AdlInfo? _info;
     private AdlPmLog? _pmLog;
-    private bool _tried;
     private bool _ready;
 
     public VendorReading Read(GpuCard gpu, MonitorLog log)
@@ -691,12 +710,11 @@ internal sealed class AmdLibrary : IDisposable
 
     private void EnsureOpen(MonitorLog? log)
     {
-        if (_tried)
+        if (_ready || !_retry.TryBegin())
         {
             return;
         }
 
-        _tried = true;
         var windows = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
         var programFiles = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
         var path = WindowsHardware.FindVendorFile(
@@ -922,6 +940,7 @@ internal sealed class AmdLibrary : IDisposable
 
 internal sealed class IntelLibrary : IDisposable
 {
+    private readonly RetryGate _retry = new();
     private IntPtr _module;
     private IntPtr _api;
     private List<IntelDevice> _devices = [];
@@ -934,7 +953,6 @@ internal sealed class IntelLibrary : IDisposable
     private CtlEnum? _enumEngines;
     private CtlEngineProps? _engineProps;
     private CtlEngineActivity? _activity;
-    private bool _tried;
     private bool _ready;
 
     public IReadOnlyList<(IntPtr Engine, ulong[] Stats)>? Begin(GpuCard gpu, MonitorLog log)
@@ -1039,12 +1057,11 @@ internal sealed class IntelLibrary : IDisposable
 
     private void EnsureOpen(MonitorLog log)
     {
-        if (_tried)
+        if (_ready || !_retry.TryBegin())
         {
             return;
         }
 
-        _tried = true;
         var windows = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
         var path = WindowsHardware.FindVendorFile(
             [Path.Combine(windows, "System32", "ControlLib.dll")],

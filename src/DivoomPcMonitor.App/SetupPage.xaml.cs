@@ -6,7 +6,8 @@ namespace DivoomPcMonitor;
 
 public sealed partial class SetupPage : Page
 {
-    private readonly DivoomDeviceClient _cloud = new(Session.Current.Log.Info);
+    private DivoomDeviceClient _cloud;
+    private CancellationTokenSource _alive;
     private IReadOnlyList<LanDevice> _devices = [];
     private IReadOnlyList<LcdGroupInfo> _groups = [];
     private IReadOnlyList<FixedDrive> _drives = [];
@@ -27,11 +28,27 @@ public sealed partial class SetupPage : Page
     public SetupPage()
     {
         InitializeComponent();
+        _cloud = new DivoomDeviceClient(Session.Current.Log.Info);
+        _alive = new CancellationTokenSource();
+    }
+
+    protected override void OnNavigatedFrom(NavigationEventArgs e)
+    {
+        _alive.Cancel();
+        _cloud.Dispose();
+        base.OnNavigatedFrom(e);
     }
 
     protected override void OnNavigatedTo(NavigationEventArgs e)
     {
         base.OnNavigatedTo(e);
+        if (_alive.IsCancellationRequested)
+        {
+            _alive.Dispose();
+            _alive = new CancellationTokenSource();
+            _cloud = new DivoomDeviceClient(Session.Current.Log.Info);
+        }
+
         if (_wizard)
         {
             ShowStep();
@@ -130,6 +147,11 @@ public sealed partial class SetupPage : Page
         return true;
     }
 
+    private static bool IsPageGone(Exception ex)
+    {
+        return ex is OperationCanceledException or ObjectDisposedException;
+    }
+
     private static void SetValue(TextBlock block, string value)
     {
         block.Text = string.IsNullOrWhiteSpace(value) ? "Not set" : value;
@@ -138,14 +160,21 @@ public sealed partial class SetupPage : Page
     private async Task LoadDevicesAsync()
     {
         SetBusy(true, "Looking for Divoom devices on this network…");
+        var cloud = _cloud;
+        var token = _alive.Token;
         try
         {
-            var devicesTask = _cloud.ListDevicesAsync(CancellationToken.None);
+            var devicesTask = cloud.ListDevicesAsync(token);
             var hardwareTask = Task.Run(static () => (Drives: WindowsHardware.ListFixedDrives(), Gpus: WindowsHardware.ListGpus()));
             _devices = await devicesTask;
             var hardware = await hardwareTask;
             _drives = hardware.Drives;
             _gpus = hardware.Gpus;
+            if (token.IsCancellationRequested)
+            {
+                return;
+            }
+
             if (_devices.Count > 0)
             {
                 _device = _devices[0];
@@ -166,6 +195,9 @@ public sealed partial class SetupPage : Page
             Notice.IsOpen = false;
             RebuildSteps();
             ShowStep();
+        }
+        catch (Exception ex) when (IsPageGone(ex))
+        {
         }
         catch (Exception ex)
         {
@@ -311,6 +343,8 @@ public sealed partial class SetupPage : Page
 
     private async Task<bool> ValidateAsync(SetupStep step)
     {
+        var cloud = _cloud;
+        var token = _alive.Token;
         switch (step)
         {
             case SetupStep.Device:
@@ -323,8 +357,17 @@ public sealed partial class SetupPage : Page
                 SetBusy(true, "Reading the LCD layout…");
                 try
                 {
-                    _groups = await _cloud.ListLcdGroupsAsync(_device.Id, CancellationToken.None);
+                    _groups = await cloud.ListLcdGroupsAsync(_device.Id, token);
+                    if (token.IsCancellationRequested)
+                    {
+                        return false;
+                    }
+
                     Notice.IsOpen = false;
+                }
+                catch (Exception ex) when (IsPageGone(ex))
+                {
+                    return false;
                 }
                 catch (Exception ex)
                 {
@@ -432,18 +475,25 @@ public sealed partial class SetupPage : Page
         var drives = _allDrives ? _drives.Select(drive => drive.DeviceId).ToArray() : [_drives[_driveIndex].DeviceId];
         var gpu = _gpus.Count == 0 ? new GpuCard() : _gpus[Math.Clamp(_gpuIndex, 0, _gpus.Count - 1)];
         var path = Session.Current.ConfigPath ?? ConfigLocator.DefaultSavePath(AppContext.BaseDirectory);
+        var cloud = _cloud;
+        var token = _alive.Token;
         SetBusy(true, "Saving the configuration and selecting the PC Monitor app…");
         try
         {
             var cpu = await Task.Run(WindowsHardware.ReadCpuVendor);
+            if (token.IsCancellationRequested)
+            {
+                return;
+            }
+
             if (cpu.Length == 0)
             {
                 cpu = "Unknown";
             }
 
-            ConfigStore.Write(path, _device.Id, _device.Ip, _lcdIndependence, _lcdIndex.ToString(), _lcdClockId, drives, cpu, gpu);
+            ConfigStore.Write(path, _device.Id, _device.Ip, _lcdIndependence, _lcdIndex.ToString(), "625", drives, cpu, gpu);
             Session.Current.ConfigPath = path;
-            var selected = await _cloud.SelectClockAsync(_device.Id, _device.Ip, _lcdIndependence, _lcdIndex.ToString(), _lcdClockId, verbose: true, CancellationToken.None);
+            var selected = await cloud.SelectClockAsync(_device.Id, _device.Ip, _lcdIndependence, _lcdIndex.ToString(), _lcdClockId, verbose: true, token);
             if (!selected)
             {
                 Notice.Severity = InfoBarSeverity.Warning;
@@ -458,6 +508,9 @@ public sealed partial class SetupPage : Page
             _wizard = false;
             Session.Current.Restart();
             Session.Current.RequestNavigate("monitor");
+        }
+        catch (Exception ex) when (IsPageGone(ex))
+        {
         }
         catch (Exception ex)
         {

@@ -188,12 +188,84 @@ public class BehaviorTests
         };
 
         var busy = HardwareMath.BusierLogicalDisk(before, after, ["C:", "D:"]);
-        Assert.Equal("D:", busy.Name);
-        Assert.Equal(100, busy.Util);
+        Assert.Equal("C:", busy.Name);
+        Assert.Equal(75, busy.Util);
+
+        var stuck = HardwareMath.BusierLogicalDisk(before, after, ["D:"]);
+        Assert.Null(stuck.Name);
+        Assert.Null(stuck.Util);
+
+        var saturatedBefore = new Dictionary<string, DiskSample>
+        {
+            ["D:"] = new() { Idle = 1000, IdleBase = 5_000_000, Timestamp = 100 },
+        };
+        var saturatedAfter = new Dictionary<string, DiskSample>
+        {
+            ["D:"] = new() { Idle = 1000, IdleBase = 15_000_000, Timestamp = 200 },
+        };
+        var saturated = HardwareMath.BusierLogicalDisk(saturatedBefore, saturatedAfter, ["D:"]);
+        Assert.Equal("D:", saturated.Name);
+        Assert.Equal(100, saturated.Util);
 
         var onlyC = HardwareMath.BusierLogicalDisk(before, after, ["c:"]);
         Assert.Equal("C:", onlyC.Name);
         Assert.Equal(75, onlyC.Util);
+    }
+
+    [Fact]
+    public void IdleIntelEngineIsZeroRatherThanMissing()
+    {
+        Assert.Equal(0, HardwareMath.IntelUtil([0, 1_000], [0, 2_000]));
+        Assert.Null(HardwareMath.IntelUtil([0, 1_000], [0, 1_000]));
+        Assert.Equal(50, HardwareMath.IntelUtil([1_000, 1_000], [2_000, 3_000]));
+    }
+
+    [Fact]
+    public void WddmTemperatureIgnoresThePowerField()
+    {
+        var buffer = new byte[64];
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(buffer.AsSpan(52), 1000);
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt32LittleEndian(buffer.AsSpan(WindowsHardware.AdapterPerfTemperatureOffset), 450);
+        Assert.Equal(45, WindowsHardware.DecodeAdapterTemperature(buffer));
+        Assert.Null(WindowsHardware.DecodeAdapterTemperature(buffer.AsSpan(0, 16)));
+    }
+
+    [Fact]
+    public void DefaultGpuPrefersArcOverIntegratedIntel()
+    {
+        var chosen = HardwareMath.SelectDefault(
+        [
+            new GpuCard { Vendor = "Intel", Pci = "00:02.0", Name = "Intel(R) UHD Graphics" },
+            new GpuCard { Vendor = "Intel", Pci = "03:00.0", Name = "Intel(R) Arc(TM) B580 Graphics" },
+        ]);
+        Assert.NotNull(chosen);
+        Assert.Equal("03:00.0", chosen.Pci);
+    }
+
+    [Fact]
+    public void DuplicatePciUsesThePinnedLuid()
+    {
+        var resolved = HardwareMath.MatchGpu(
+            new GpuCard { Vendor = "NVIDIA", Pci = "01:00.0", Name = "RTX", Luid = "luid_0x00000000_0x00000002" },
+            [
+                new GpuCard { Vendor = "NVIDIA", Pci = "01:00.0", Name = "RTX", Luid = "luid_0x00000000_0x00000001" },
+                new GpuCard { Vendor = "NVIDIA", Pci = "01:00.0", Name = "RTX", Luid = "luid_0x00000000_0x00000002" },
+            ]);
+        Assert.Equal("luid_0x00000000_0x00000002", resolved.Luid);
+    }
+
+    [Fact]
+    public void CpuTemperatureSkipsGpuZonesWhenNoCpuZoneIsNamed()
+    {
+        var zones = new[]
+        {
+            new ThermalZone { Name = "gpu-hot", DeciKelvin = 3200 },
+            new ThermalZone { Name = @"\_SB.TZ10", DeciKelvin = 3050 },
+        };
+        var cpu = HardwareMath.SelectThermal(zones, "Cpu");
+        Assert.NotNull(cpu);
+        Assert.Equal(@"\_SB.TZ10", cpu.Name);
+        Assert.Null(HardwareMath.SelectThermal([new ThermalZone { Name = "gpu-hot", DeciKelvin = 3200 }], "Cpu"));
     }
 
     [Fact]
@@ -218,6 +290,14 @@ public class BehaviorTests
             new EngineSample { InstanceName = "pid_3_luid_0x00000000_0x00010c1b_phys_0_eng_1_engtype_compute_0", CookedValue = -5 },
         };
         Assert.Equal(25, HardwareMath.GpuUsage(withNaN, "luid_0x00000000_0x00010C1B"));
+
+        var busiestKind = new[]
+        {
+            new EngineSample { InstanceName = "pid_1_luid_0x00000000_0x00010c1b_phys_0_eng_0_engtype_3d", CookedValue = 10 },
+            new EngineSample { InstanceName = "pid_1_luid_0x00000000_0x00010c1b_phys_0_eng_1_engtype_videodecode", CookedValue = 55 },
+            new EngineSample { InstanceName = "pid_1_luid_0x00000000_0x00010c1b_phys_0_eng_2_engtype_copy", CookedValue = 70 },
+        };
+        Assert.Equal(70, HardwareMath.GpuUsage(busiestKind, "luid_0x00000000_0x00010c1b"));
     }
 
     [Fact]
@@ -363,32 +443,33 @@ public class BehaviorTests
     }
 
     [Fact]
-    public void InstalledConfigIsFoundByWalkingUpAndIsNotRewritten()
+    public void ConfigIsFoundBesideTheAppAndNotInADistantParent()
     {
         var root = Path.Combine(Path.GetTempPath(), "divoom-walk-" + Guid.NewGuid().ToString("n"));
-        var start = Path.Combine(root, "tests", "DivoomPcMonitor.Tests");
-        Directory.CreateDirectory(start);
-        var configPath = Path.Combine(root, "config.env");
-        File.WriteAllText(configPath, "[DEFAULT]\ndevice_id=1\ndevice_ip=10.1.2.3\nlcd_independence=0\nlcd_index=0\nlcd_clock_id=625\nhard_drive=C:\n");
-        var before = File.GetLastWriteTimeUtc(configPath);
-        var length = new FileInfo(configPath).Length;
+        var nested = Path.Combine(root, "src", "bin");
+        Directory.CreateDirectory(nested);
+        var distant = Path.Combine(root, "config.env");
+        File.WriteAllText(distant, "[DEFAULT]\ndevice_id=1\ndevice_ip=10.1.2.3\nlcd_independence=0\nlcd_index=0\nlcd_clock_id=625\nhard_drive=C:\n");
         try
         {
-            var found = ConfigLocator.Find(start, Path.Combine(root, "tests"));
-            Assert.Equal(Path.GetFullPath(configPath), found is null ? null : Path.GetFullPath(found));
-            var config = ConfigStore.Read(configPath);
-            Assert.Equal("10.1.2.3", config.DeviceIp);
-            Assert.Equal("C:", config.HardDrive[0]);
-            Assert.Equal(before, File.GetLastWriteTimeUtc(configPath));
-            Assert.Equal(length, new FileInfo(configPath).Length);
+            var missed = ConfigLocator.Find(nested, nested);
+            Assert.NotEqual(Path.GetFullPath(distant), missed is null ? null : Path.GetFullPath(missed));
 
-            var runtimeDir = Path.Combine(root, "runtime");
+            var beside = Path.Combine(nested, "config.env");
+            File.WriteAllText(beside, File.ReadAllText(distant));
+            Assert.Equal(Path.GetFullPath(beside), Path.GetFullPath(ConfigLocator.Find(nested, nested)!));
+
+            var app = Path.Combine(root, "app");
+            var runtimeDir = Path.Combine(app, "runtime");
             Directory.CreateDirectory(runtimeDir);
-            var rootExe = Path.Combine(root, "DivoomPcMonitor.exe");
+            var appConfig = Path.Combine(app, "config.env");
+            File.WriteAllText(appConfig, File.ReadAllText(distant));
+            var rootExe = Path.Combine(app, "DivoomPcMonitor.exe");
             var runtimeExe = Path.Combine(runtimeDir, "DivoomPcMonitor.exe");
             File.WriteAllText(rootExe, "");
             File.WriteAllText(runtimeExe, "");
-            Assert.Equal(Path.GetFullPath(configPath), Path.GetFullPath(ConfigLocator.DefaultSavePath(runtimeDir)));
+            Assert.Equal(Path.GetFullPath(appConfig), Path.GetFullPath(ConfigLocator.Find(runtimeDir, runtimeDir)!));
+            Assert.Equal(Path.GetFullPath(appConfig), Path.GetFullPath(ConfigLocator.DefaultSavePath(runtimeDir)));
             Assert.Equal(Path.GetFullPath(rootExe), Path.GetFullPath(ConfigLocator.ResolveLauncherPath(runtimeExe)!));
         }
         finally
@@ -408,7 +489,10 @@ public class BehaviorTests
     [Fact]
     public void LoginCommandStartsInTheBackgroundWithoutElevation()
     {
-        Assert.Equal("\"C:\\Apps\\Divoom PC Monitor\\DivoomPcMonitor.exe\" --background", LoginStartup.CommandLine(@"C:\Apps\Divoom PC Monitor\DivoomPcMonitor.exe"));
+        var expected = LoginStartup.CommandLine(@"C:\Apps\Divoom PC Monitor\DivoomPcMonitor.exe");
+        Assert.Equal("\"C:\\Apps\\Divoom PC Monitor\\DivoomPcMonitor.exe\" --background", expected);
+        Assert.True(LoginStartup.SameCommand(expected, expected));
+        Assert.False(LoginStartup.SameCommand("\"C:\\Old\\DivoomPcMonitor.exe\" --background", expected));
     }
 
     [Fact]

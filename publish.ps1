@@ -5,8 +5,8 @@
 .DESCRIPTION
     Runs the tests, then publishes a self-contained folder for each runtime.
     Pass -Version to stamp that version into the exe and the zip name.
-    A GitHub release does this from the release tag. The exe needs the files
-    beside it. Do not publish as a single file.
+    A GitHub release does this from a version tag. The exe and the runtime
+    files sit in one folder. Do not publish as a single file.
 
 .EXAMPLE
     ./publish.ps1
@@ -47,7 +47,7 @@ function Find-DotNet {
         return $command.Source
     }
 
-    throw 'The .NET 8 SDK was not found. Install it from https://dot.net/download and run this script again.'
+    throw 'The .NET 10 SDK was not found. Install it from https://dot.net/download and run this script again.'
 }
 
 function Get-DefaultVersion {
@@ -102,9 +102,13 @@ $env:DOTNET_ROOT = $dotnetRoot
 $env:Path = $dotnetRoot + [IO.Path]::PathSeparator + $env:Path
 
 $appProject = Join-Path $Root 'src\DivoomPcMonitor.App\DivoomPcMonitor.App.csproj'
-$testProject = Join-Path $Root 'tests\DivoomPcMonitor.Tests\DivoomPcMonitor.Tests.csproj'
+$solution = Join-Path $Root 'DivoomPcMonitor.sln'
 if (-not (Test-Path -LiteralPath $appProject)) {
     throw "Could not find $appProject"
+}
+
+if (-not (Test-Path -LiteralPath $solution)) {
+    throw "Could not find $solution"
 }
 
 if ([string]::IsNullOrWhiteSpace($Version)) {
@@ -117,8 +121,8 @@ Write-Host "Version $($stamp.Informational)"
 & $dotnet --version
 
 if (-not $SkipTest) {
-    Write-Host 'Running tests...'
-    & $dotnet test $testProject -c $Configuration --nologo
+    Write-Host 'Building and testing...'
+    & $dotnet test $solution -c $Configuration --nologo
     if ($LASTEXITCODE -ne 0) {
         exit $LASTEXITCODE
     }
@@ -129,71 +133,48 @@ if ($Runtime -ne 'all') {
     $runtimes = @($Runtime)
 }
 
-$keepDirs = @('Assets', 'en-us', 'en-US', 'Microsoft.UI.Xaml')
-$oldDllBytes = [System.Text.Encoding]::UTF8.GetBytes("DivoomPcMonitor.dll`0")
-$newDllBytes = [System.Text.Encoding]::UTF8.GetBytes("runtime\DivoomPcMonitor.dll`0")
-
 foreach ($rid in $runtimes) {
     $output = Join-Path $Root ("dist\DivoomPcMonitor-{0}-{1}" -f $stamp.FileName, $rid)
-    $runtimeDir = Join-Path $output 'runtime'
     $zip = "$output.zip"
+    $hashFile = "$zip.sha256"
     if (Test-Path -LiteralPath $output) {
         Remove-Item -LiteralPath $output -Recurse -Force
     }
 
-    if (Test-Path -LiteralPath $zip) {
-        Remove-Item -LiteralPath $zip -Force
+    foreach ($extra in @($zip, $hashFile)) {
+        if (Test-Path -LiteralPath $extra) {
+            Remove-Item -LiteralPath $extra -Force
+        }
     }
 
     Write-Host "Publishing $rid to $output"
-    & $dotnet publish $appProject -c $Configuration -r $rid --self-contained true -p:WindowsAppSDKSelfContained=true "-p:Version=$($stamp.Informational)" "-p:AssemblyVersion=$($stamp.Assembly)" "-p:FileVersion=$($stamp.Assembly)" "-p:InformationalVersion=$($stamp.Informational)" -p:IncludeSourceRevisionInInformationalVersion=false -o $runtimeDir --nologo
+    & $dotnet publish $appProject -c $Configuration -r $rid --self-contained true -p:WindowsAppSDKSelfContained=true "-p:Version=$($stamp.Informational)" "-p:AssemblyVersion=$($stamp.Assembly)" "-p:FileVersion=$($stamp.Assembly)" "-p:InformationalVersion=$($stamp.Informational)" -p:IncludeSourceRevisionInInformationalVersion=false -o $output --nologo
     if ($LASTEXITCODE -ne 0) {
         exit $LASTEXITCODE
     }
 
-    $runtimeExe = Join-Path $runtimeDir 'DivoomPcMonitor.exe'
-    if (-not (Test-Path -LiteralPath $runtimeExe)) {
-        throw "Publish finished without $runtimeExe"
-    }
-
-    $exeBytes = [System.IO.File]::ReadAllBytes($runtimeExe)
-    $patched = $false
-    for ($i = 0; $i -le ($exeBytes.Length - $oldDllBytes.Length); $i++) {
-        $match = $true
-        for ($j = 0; $j -lt $oldDllBytes.Length; $j++) {
-            if ($exeBytes[$i + $j] -ne $oldDllBytes[$j]) {
-                $match = $false
-                break
-            }
-        }
-        if ($match) {
-            [Array]::Copy($newDllBytes, 0, $exeBytes, $i, $newDllBytes.Length)
-            $patched = $true
-            break
-        }
-    }
-    if (-not $patched) {
-        throw "Could not relocate AppHost entry point in $runtimeExe"
-    }
-
     $exe = Join-Path $output 'DivoomPcMonitor.exe'
-    [System.IO.File]::WriteAllBytes($exe, $exeBytes)
-    Remove-Item -LiteralPath $runtimeExe -Force
+    if (-not (Test-Path -LiteralPath $exe)) {
+        throw "Publish finished without $exe"
+    }
 
-    Get-ChildItem -LiteralPath $runtimeDir -Directory | Where-Object { $keepDirs -notcontains $_.Name } | ForEach-Object {
-        Remove-Item -LiteralPath $_.FullName -Recurse -Force
-    }
-    Get-ChildItem -LiteralPath $runtimeDir -Include *.pdb,createdump.exe,RestartAgent.exe -File | ForEach-Object {
-        Remove-Item -LiteralPath $_.FullName -Force
-    }
+    Get-ChildItem -LiteralPath $output -Recurse -File |
+        Where-Object { $_.Extension -eq '.pdb' -or $_.Name -eq 'createdump.exe' -or $_.Name -eq 'RestartAgent.exe' } |
+        Remove-Item -Force
 
     Compress-Archive -Path $output -DestinationPath $zip
+    $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $zip).Hash.ToLowerInvariant()
+    $hashLine = "{0}  {1}" -f $hash, (Split-Path -Leaf $zip)
+    $utf8 = New-Object System.Text.UTF8Encoding $false
+    [System.IO.File]::WriteAllText($hashFile, $hashLine + "`n", $utf8)
+
     $item = Get-Item -LiteralPath $exe
     $zipItem = Get-Item -LiteralPath $zip
     Write-Host ("Ready: {0}" -f $item.FullName)
     Write-Host ("File version: {0}" -f $item.VersionInfo.FileVersion)
     Write-Host ("Product version: {0}" -f $item.VersionInfo.ProductVersion)
     Write-Host ("Zip: {0} ({1:N1} MB)" -f $zipItem.FullName, ($zipItem.Length / 1MB))
+    Write-Host ("SHA256: {0}" -f $hashLine)
 }
 
-Write-Host 'Keep DivoomPcMonitor.exe and the runtime folder together.'
+Write-Host 'The exe and the runtime files are in the same folder.'

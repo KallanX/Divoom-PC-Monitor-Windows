@@ -15,10 +15,21 @@ public static class LoginStartup
         return "\"" + executablePath + "\" --background";
     }
 
-    public static bool IsEnabled()
+    public static bool IsEnabled(string? executablePath)
     {
+        if (string.IsNullOrWhiteSpace(executablePath))
+        {
+            return false;
+        }
+
         using var key = Registry.CurrentUser.OpenSubKey(RunKey, writable: false);
-        return key?.GetValue(ValueName) is string value && value.Trim().Length > 0;
+        return key?.GetValue(ValueName) is string value && SameCommand(value, CommandLine(executablePath));
+    }
+
+    public static bool SameCommand(string? stored, string expected)
+    {
+        return !string.IsNullOrWhiteSpace(stored)
+            && string.Equals(stored.Trim(), expected.Trim(), StringComparison.OrdinalIgnoreCase);
     }
 
     public static void Enable(string executablePath)

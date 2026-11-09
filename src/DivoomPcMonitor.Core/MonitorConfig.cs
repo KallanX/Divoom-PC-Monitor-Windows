@@ -249,19 +249,6 @@ public static class ConfigLocator
             Consider(Path.Combine(executableDirectory, "config.env"));
         }
 
-        foreach (var directory in Ancestors(startDirectory).Take(8))
-        {
-            Consider(Path.Combine(directory, "config.env"));
-        }
-
-        if (!string.IsNullOrWhiteSpace(executableDirectory))
-        {
-            foreach (var directory in Ancestors(executableDirectory).Take(8))
-            {
-                Consider(Path.Combine(directory, "config.env"));
-            }
-        }
-
         Consider(Path.Combine(LocalFolder(), "config.env"));
         return ordered.FirstOrDefault(File.Exists);
     }
@@ -353,25 +340,6 @@ public static class ConfigLocator
             "DivoomPCMonitor");
     }
 
-    private static IEnumerable<string> Ancestors(string directory)
-    {
-        DirectoryInfo? parent;
-        try
-        {
-            parent = new DirectoryInfo(directory).Parent;
-        }
-        catch (Exception)
-        {
-            yield break;
-        }
-
-        while (parent is not null)
-        {
-            yield return parent.FullName;
-            parent = parent.Parent;
-        }
-    }
-
     private static bool CanWrite(string directory)
     {
         try
@@ -431,8 +399,23 @@ public sealed class AppSettings
             IntervalSeconds = 1;
         }
 
-        Directory.CreateDirectory(ConfigLocator.LocalFolder());
+        var folder = ConfigLocator.LocalFolder();
+        Directory.CreateDirectory(folder);
         var json = JsonSerializer.Serialize(this, JsonOptions);
-        File.WriteAllText(FilePath, json);
+        var temporary = FilePath + ".tmp";
+        var replaced = false;
+        try
+        {
+            File.WriteAllText(temporary, json);
+            File.Move(temporary, FilePath, overwrite: true);
+            replaced = true;
+        }
+        finally
+        {
+            if (!replaced && File.Exists(temporary))
+            {
+                File.Delete(temporary);
+            }
+        }
     }
 }

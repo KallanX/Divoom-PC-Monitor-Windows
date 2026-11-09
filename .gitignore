@@ -1,6 +1,8 @@
 config.env
 .vscode/
+.vs/
 bin/
 obj/
 dist/
-*.sln
+*.user
+*.suo

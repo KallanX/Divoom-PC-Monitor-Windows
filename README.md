@@ -12,12 +12,12 @@ Administrator rights are not required.
 | --- | --- |
 | CPU usage | `GetSystemTimes`, measured for one second. Intel, AMD, and Snapdragon. |
 | CPU temperature | AMD ADL2 CPU sensor (`atiadlxx.dll`) when available, or the warmest CPU ACPI thermal zone on Intel, AMD, and Snapdragon (including Qualcomm Oryon cluster TSENS zones `QCOM0C58` / `QCOM0C59` / `QCOM0D01`). |
-| GPU usage | NVIDIA: `nvidia-smi`. AMD: AMD Display Library (`atiadlxx.dll`). Intel, including Arc: Intel Graphics Control Library (`ControlLib.dll`). Every vendor, including Qualcomm Adreno, also falls back to the Windows GPU Engine counters for the adapter's current DXGI LUID. |
-| GPU temperature | NVIDIA: `nvidia-smi`. AMD: AMD Display Library. Intel, including Arc: Intel Graphics Control Library. Qualcomm Adreno: ACPI GPU TSENS thermal zone (`QCOM0C91`). Also falls back to WDDM `D3DKMTQueryAdapterInfo` (`KMTQAITYPE_ADAPTERPERFDATA`) and named GPU ACPI thermal zones. |
+| GPU usage | NVIDIA: `nvidia-smi`. AMD: AMD Display Library (`atiadlxx.dll`). Intel, including Arc: Intel Graphics Control Library (`ControlLib.dll`). Every vendor, including Qualcomm Adreno, also falls back to the Windows GPU Engine counters for the adapter's current DXGI LUID. The fallback is the busiest of the 3D, compute, video decode, video encode, video, and copy engines. Those engines are not added together. |
+| GPU temperature | NVIDIA: `nvidia-smi`. AMD: AMD Display Library. Intel, including Arc: Intel Graphics Control Library. Qualcomm Adreno and the other fallbacks use WDDM `D3DKMTQueryAdapterInfo` (`KMTQAITYPE_ADAPTERPERFDATA`) and then a named GPU ACPI thermal zone, including the Adreno TSENS zone `QCOM0C91`. |
 | Memory usage | `GlobalMemoryStatusEx` |
-| Disk usage | Logical disk `% Idle Time` over that same one-second window. The busiest selected drive is shown. |
+| Disk usage | Logical disk `% Idle Time` over that same one-second window. The busiest selected fixed drive is shown. A drive whose idle counter stays at zero is skipped. A drive that has reported idle time and then goes fully busy is shown as 100%. |
 
-A failed sensor is sent as `--`. A real zero is sent as `0%` or `0°C`. The previous good reading is kept when a later sample fails. After each update the app waits the number of seconds you set. Each update spends about one second measuring CPU, GPU, and disk, and that wait starts after the update finishes.
+A failed sensor is sent as `--`. A real zero is sent as `0%` or `0°C`. The previous good reading is kept when a later sample fails, including a real zero. After each update the app waits the number of seconds you set. Each update spends about one second measuring CPU, GPU, and disk, and that wait starts after the update finishes.
 
 The device protocol has six text fields and no drive-name field. The drive letter is shown in the window and the debug log.
 
@@ -55,19 +55,19 @@ Open the app and choose Setup. It lists the Divoom devices, the LCD face, the fi
 
 If the PC Monitor app is already on a face, that face is labeled in the list. The app can still be assigned to any face. A device with no LCD groups, such as a Pixoo64, uses independence 0, index 0, and clock 625.
 
-`config.env` uses the same keys as the Linux monitor, plus `gpu_luid` so a Windows adapter can be pinned when it has no PCI address. An older file that uses `DeviceIP`, `LcdIndex`, and `SelectedDriveLetters` still loads.
+`config.env` uses the same keys as the Linux monitor, plus `gpu_luid` so a Windows adapter can be pinned when it has no PCI address. An older file that uses `DeviceIP`, `LcdIndex`, and `SelectedDriveLetters` still loads. The repository includes [config.env.example](config.env.example) with empty device fields. `config.env` itself stays on the machine that runs the app.
 
-The app looks for `config.env` in this order: the current directory, the folder that contains the exe, parent folders of those two, then `%LOCALAPPDATA%\DivoomPCMonitor\config.env`. Setup writes back to the file it loaded. A new file is saved beside the exe when that folder is writable, and otherwise under `%LOCALAPPDATA%\DivoomPCMonitor`.
+The app looks for `config.env` in this order: the current directory, the app folder, the folder that contains the exe, then `%LOCALAPPDATA%\DivoomPCMonitor\config.env`. It does not search further parent folders. When the exe is inside a folder named `runtime`, the app folder is the parent of that folder. `DIVOOM_ROOT_DIR` overrides the app folder when that directory exists. Setup writes back to the file it loaded. A new file is saved beside the exe when that folder is writable, and otherwise under `%LOCALAPPDATA%\DivoomPCMonitor`.
 
 The wait between updates is stored in `%LOCALAPPDATA%\DivoomPCMonitor\settings.json`. Changing it does not rewrite `config.env`. The default is 30 seconds and the minimum is 1.
 
 ## Run
 
-Double-click `DivoomPcMonitor.exe` in the published folder. Keep `DivoomPcMonitor.exe` and the `runtime` folder together. When Setup creates `config.env`, it saves it right beside `DivoomPcMonitor.exe`.
+Double-click `DivoomPcMonitor.exe` in the published folder. The exe and the .NET and Windows App SDK files are in that same folder. An older zip that put the exe next to a `runtime` folder still runs if those two stay together. When Setup creates `config.env`, it saves it right beside `DivoomPcMonitor.exe`.
 
 - Start / Pause turns the monitor on and off.
-- Start at sign-in writes a per-user startup entry. It does not need administrator and does not create a scheduled task.
-- Write a debug log appends to `%LOCALAPPDATA%\DivoomPCMonitor\LogFile.log`.
+- Start at sign-in writes a per-user startup entry. It does not need administrator and does not create a scheduled task. The switch is on only when that entry points at this copy of the app.
+- Write a debug log appends the same lines to the Log page and to `%LOCALAPPDATA%\DivoomPCMonitor\LogFile.log`, including the per-sample sensor detail.
 - Closing the window hides it. The tray icon remains. Open shows the window again. Quit stops the monitor.
 
 Sign-in starts the app with `--background`. A valid configuration starts monitoring in the tray. An unfinished configuration opens Setup.
@@ -84,10 +84,11 @@ Unregister-ScheduledTask -TaskName DivoomPCMonitor -Confirm:$false
 
 The version in the window and in the exe file properties comes from the build. [Directory.Build.props](Directory.Build.props) sets the local default, currently `0.1.0`.
 
-GitHub builds only when you push a version tag. A push to `main` does not build. Pushing tag `v0.1.0` builds that version for `win-x64` and `win-arm64` and attaches these files to the GitHub release for that tag:
+GitHub Actions builds the app and runs the tests on every push to `main` and on pull requests. A version tag also publishes the app. Pushing tag `v0.1.0` builds that version for `win-x64` and `win-arm64` and attaches these files to the GitHub release for that tag:
 
 - `DivoomPcMonitor-0.1.0-win-x64.zip`
 - `DivoomPcMonitor-0.1.0-win-arm64.zip`
+- `SHA256SUMS.txt`
 
 ```powershell
 git tag v0.1.0
@@ -98,7 +99,9 @@ The tag needs a `v` and three numbers, such as `v0.1.0`, and it has to point at 
 
 ## Build
 
-`publish.ps1` builds on this PC only. It does not publish a GitHub release. It runs the tests, then writes a self-contained folder for a 64-bit Intel/AMD PC and for a Windows ARM PC. Each folder contains `DivoomPcMonitor.exe` at the root and a `runtime` subfolder containing the .NET and Windows App SDK runtime files. The script also writes a zip of that folder.
+[DivoomPcMonitor.sln](DivoomPcMonitor.sln) contains the app, the sensor library, and the tests. `dotnet build DivoomPcMonitor.sln` builds the app for this PC. `dotnet test` runs the tests.
+
+`publish.ps1` builds on this PC only. It does not publish a GitHub release. It runs the tests, then writes a self-contained folder for a 64-bit Intel/AMD PC and for a Windows ARM PC. Each folder is flat: `DivoomPcMonitor.exe` sits next to the .NET and Windows App SDK files. The script writes a zip of that folder and a `.sha256` file beside the zip. Symbol files, `createdump.exe`, and `RestartAgent.exe` are left out of the zip.
 
 ```powershell
 ./publish.ps1
@@ -112,7 +115,7 @@ To build one kind of PC:
 ./publish.ps1 -Runtime win-arm64 -Version 0.1.0
 ```
 
-For version `0.1.0` the exes are `dist/DivoomPcMonitor-0.1.0-win-x64/DivoomPcMonitor.exe` and `dist/DivoomPcMonitor-0.1.0-win-arm64/DivoomPcMonitor.exe`. The .NET 8 SDK is required to build. The published app does not need it. When `%LOCALAPPDATA%\Microsoft\dotnet\dotnet.exe` exists, the script uses that SDK.
+For version `0.1.0` the exes are `dist/DivoomPcMonitor-0.1.0-win-x64/DivoomPcMonitor.exe` and `dist/DivoomPcMonitor-0.1.0-win-arm64/DivoomPcMonitor.exe`. The .NET 10 SDK is required to build. The published app does not need it. When `%LOCALAPPDATA%\Microsoft\dotnet\dotnet.exe` exists, the script uses that SDK.
 
 ## Author
 
