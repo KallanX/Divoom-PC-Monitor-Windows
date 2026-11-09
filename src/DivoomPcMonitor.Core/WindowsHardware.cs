@@ -131,6 +131,9 @@ public static class WindowsHardware
         return snapshot;
     }
 
+    private static string? _cachedNvidiaSmi;
+    private static IReadOnlyDictionary<string, string>? _cachedThermalHardwareIds;
+
     public static int? MemoryLoad()
     {
         var status = new MemoryStatusEx { Length = (uint)Marshal.SizeOf<MemoryStatusEx>() };
@@ -139,7 +142,7 @@ public static class WindowsHardware
             return null;
         }
 
-        return status.MemoryLoad < 0 ? null : (int)status.MemoryLoad;
+        return status.MemoryLoad > 100 ? 100 : (int)status.MemoryLoad;
     }
 
     public static long[]? SystemTimes()
@@ -154,6 +157,12 @@ public static class WindowsHardware
 
     public static string? FindNvidiaSmi()
     {
+        var cached = Volatile.Read(ref _cachedNvidiaSmi);
+        if (cached is not null && File.Exists(cached))
+        {
+            return cached;
+        }
+
         var path = Environment.GetEnvironmentVariable("PATH") ?? "";
         foreach (var directory in path.Split(Path.PathSeparator))
         {
@@ -165,6 +174,7 @@ public static class WindowsHardware
             var candidate = Path.Combine(directory.Trim(), "nvidia-smi.exe");
             if (File.Exists(candidate))
             {
+                Volatile.Write(ref _cachedNvidiaSmi, candidate);
                 return candidate;
             }
         }
@@ -179,6 +189,7 @@ public static class WindowsHardware
         {
             if (File.Exists(candidate))
             {
+                Volatile.Write(ref _cachedNvidiaSmi, candidate);
                 return candidate;
             }
         }
@@ -207,7 +218,19 @@ public static class WindowsHardware
             {
                 RecurseSubdirectories = true,
                 IgnoreInaccessible = true,
-            }).FirstOrDefault();
+            })
+            .OrderByDescending(static file =>
+            {
+                try
+                {
+                    return File.GetLastWriteTimeUtc(file);
+                }
+                catch (Exception)
+                {
+                    return DateTime.MinValue;
+                }
+            })
+            .FirstOrDefault();
         }
         catch (Exception)
         {
@@ -230,23 +253,53 @@ public static class WindowsHardware
             var info = new SpDevInfoData { Size = (uint)Marshal.SizeOf<SpDevInfoData>() };
             for (uint index = 0; SetupDiEnumDeviceInfo(deviceSet, index, ref info); index++)
             {
-                var name = ReadDeviceProperty(deviceSet, ref info, 0x0C);
-                if (string.IsNullOrWhiteSpace(name))
-                {
-                    name = ReadDeviceProperty(deviceSet, ref info, 0x00);
-                }
-
-                var location = ReadDeviceProperty(deviceSet, ref info, 0x0D);
-                var match = PciLocation.Match(location ?? "");
-                if (!match.Success || string.IsNullOrWhiteSpace(name) || map.ContainsKey(name))
+                var friendlyName = ReadDeviceProperty(deviceSet, ref info, 0x0C);
+                var deviceDesc = ReadDeviceProperty(deviceSet, ref info, 0x00);
+                if (string.IsNullOrWhiteSpace(friendlyName) && string.IsNullOrWhiteSpace(deviceDesc))
                 {
                     continue;
                 }
 
-                var bus = int.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture);
-                var device = int.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture);
-                var function = int.Parse(match.Groups[3].Value, CultureInfo.InvariantCulture);
-                map[name] = $"{bus:x2}:{device:x2}.{function:x}";
+                string? pci = null;
+                if (ReadDeviceDwordProperty(deviceSet, ref info, 0x15, out var busNum)
+                    && ReadDeviceDwordProperty(deviceSet, ref info, 0x1C, out var address)
+                    && busNum <= 255)
+                {
+                    var devNum = (address >> 16) & 0xFFFF;
+                    var funcNum = address & 0xFFFF;
+                    if (devNum <= 31 && funcNum <= 7)
+                    {
+                        pci = $"{busNum:x2}:{devNum:x2}.{funcNum:x}";
+                    }
+                }
+
+                if (pci is null)
+                {
+                    var location = ReadDeviceProperty(deviceSet, ref info, 0x0D);
+                    var match = PciLocation.Match(location ?? "");
+                    if (match.Success)
+                    {
+                        var bus = int.Parse(match.Groups[1].Value, CultureInfo.InvariantCulture);
+                        var device = int.Parse(match.Groups[2].Value, CultureInfo.InvariantCulture);
+                        var function = int.Parse(match.Groups[3].Value, CultureInfo.InvariantCulture);
+                        pci = $"{bus:x2}:{device:x2}.{function:x}";
+                    }
+                }
+
+                if (pci is null)
+                {
+                    continue;
+                }
+
+                if (!string.IsNullOrWhiteSpace(friendlyName))
+                {
+                    map.TryAdd(friendlyName, pci);
+                }
+
+                if (!string.IsNullOrWhiteSpace(deviceDesc))
+                {
+                    map.TryAdd(deviceDesc, pci);
+                }
             }
         }
         finally
@@ -255,6 +308,20 @@ public static class WindowsHardware
         }
 
         return map;
+    }
+
+    private static bool ReadDeviceDwordProperty(IntPtr deviceSet, ref SpDevInfoData info, uint property, out uint value)
+    {
+        var buffer = new byte[4];
+        if (!SetupDiGetDeviceRegistryProperty(deviceSet, ref info, property, out var regType, buffer, (uint)buffer.Length, out _)
+            || regType != 4)
+        {
+            value = 0;
+            return false;
+        }
+
+        value = BitConverter.ToUInt32(buffer, 0);
+        return true;
     }
 
     private static string ReadDeviceProperty(IntPtr deviceSet, ref SpDevInfoData info, uint property)
@@ -277,6 +344,186 @@ public static class WindowsHardware
         var text = System.Text.Encoding.Unicode.GetString(buffer);
         var end = text.IndexOf('\0');
         return (end >= 0 ? text[..end] : text).Trim();
+    }
+
+    public static IReadOnlyDictionary<string, string> ReadThermalZoneHardwareIds()
+    {
+        var cached = Volatile.Read(ref _cachedThermalHardwareIds);
+        if (cached is not null)
+        {
+            return cached;
+        }
+
+        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var deviceSet = SetupDiGetClassDevsAll(IntPtr.Zero, "ACPI", IntPtr.Zero, 0x06);
+        if (deviceSet == IntPtr.Zero || deviceSet == new IntPtr(-1))
+        {
+            return map;
+        }
+
+        try
+        {
+            var biosKey = new DevPropKey
+            {
+                Fmtid = new Guid("540b947e-8b40-45bc-a8a2-6a0b894cbda2"),
+                Pid = 10,
+            };
+            var info = new SpDevInfoData { Size = (uint)Marshal.SizeOf<SpDevInfoData>() };
+            for (uint index = 0; SetupDiEnumDeviceInfo(deviceSet, index, ref info); index++)
+            {
+                var biosName = ReadDeviceStringProperty(deviceSet, ref info, ref biosKey);
+                if (string.IsNullOrWhiteSpace(biosName))
+                {
+                    continue;
+                }
+
+                var hardwareId = ReadDeviceMultiStringProperty(deviceSet, ref info, 0x01);
+                if (!string.IsNullOrWhiteSpace(hardwareId))
+                {
+                    map[biosName] = hardwareId;
+                }
+            }
+        }
+        finally
+        {
+            SetupDiDestroyDeviceInfoList(deviceSet);
+        }
+
+        if (map.Count > 0)
+        {
+            Volatile.Write(ref _cachedThermalHardwareIds, map);
+        }
+
+        return map;
+    }
+
+    private static string ReadDeviceMultiStringProperty(IntPtr deviceSet, ref SpDevInfoData info, uint property)
+    {
+        var buffer = new byte[512];
+        if (!SetupDiGetDeviceRegistryProperty(deviceSet, ref info, property, out _, buffer, (uint)buffer.Length, out var required))
+        {
+            if (required is 0 or > 8192)
+            {
+                return "";
+            }
+
+            buffer = new byte[required];
+            if (!SetupDiGetDeviceRegistryProperty(deviceSet, ref info, property, out _, buffer, (uint)buffer.Length, out required))
+            {
+                return "";
+            }
+        }
+
+        var byteLen = required > 0 && required <= (uint)buffer.Length ? (int)required : buffer.Length;
+        var text = System.Text.Encoding.Unicode.GetString(buffer, 0, byteLen).TrimEnd('\0');
+        return text.Replace('\0', ' ').Trim();
+    }
+
+    private static string ReadDeviceStringProperty(IntPtr deviceSet, ref SpDevInfoData info, ref DevPropKey key)
+    {
+        var buffer = new byte[256];
+        if (!SetupDiGetDeviceProperty(deviceSet, ref info, ref key, out var propType, buffer, (uint)buffer.Length, out var required, 0))
+        {
+            if (required is 0 or > 4096)
+            {
+                return "";
+            }
+
+            buffer = new byte[required];
+            if (!SetupDiGetDeviceProperty(deviceSet, ref info, ref key, out propType, buffer, (uint)buffer.Length, out _, 0))
+            {
+                return "";
+            }
+        }
+
+        if (propType != 18)
+        {
+            return "";
+        }
+
+        var text = System.Text.Encoding.Unicode.GetString(buffer);
+        var end = text.IndexOf('\0');
+        return (end >= 0 ? text[..end] : text).Trim();
+    }
+
+    public static int? ReadD3dkmtGpuTemp(string? luid)
+    {
+        var clean = (luid ?? "").Trim().ToLowerInvariant();
+        if (clean.Length != 26 || !clean.StartsWith("luid_0x", StringComparison.Ordinal) || clean[15..18] != "_0x")
+        {
+            return null;
+        }
+
+        if (!uint.TryParse(clean.AsSpan(7, 8), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var high)
+            || !uint.TryParse(clean.AsSpan(18, 8), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var low))
+        {
+            return null;
+        }
+
+        var open = new D3dkmtOpenAdapterFromLuid
+        {
+            AdapterLuidLow = low,
+            AdapterLuidHigh = unchecked((int)high),
+        };
+
+        try
+        {
+            if (D3DKMTOpenAdapterFromLuid(ref open) != 0 || open.AdapterHandle == 0)
+            {
+                return null;
+            }
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+
+        const int perfDataSize = 64;
+        var perfBuffer = Marshal.AllocHGlobal(perfDataSize);
+        try
+        {
+            for (var i = 0; i < perfDataSize; i++)
+            {
+                Marshal.WriteByte(perfBuffer, i, 0);
+            }
+
+            var query = new D3dkmtQueryAdapterInfo
+            {
+                AdapterHandle = open.AdapterHandle,
+                Type = 62,
+                PrivateDriverData = perfBuffer,
+                PrivateDriverDataSize = perfDataSize,
+            };
+            if (D3DKMTQueryAdapterInfo(ref query) != 0)
+            {
+                return null;
+            }
+
+            var rawTemp = unchecked((uint)Marshal.ReadInt32(perfBuffer, 52));
+            var celsius = rawTemp switch
+            {
+                >= 150 and <= 1250 => rawTemp / 10.0,
+                >= 15 and <= 125 => (double)rawTemp,
+                _ => -1.0,
+            };
+            return celsius < 0 ? null : HardwareMath.VendorCelsius(celsius);
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(perfBuffer);
+            var close = new D3dkmtCloseAdapter { AdapterHandle = open.AdapterHandle };
+            try
+            {
+                D3DKMTCloseAdapter(ref close);
+            }
+            catch (Exception)
+            {
+            }
+        }
     }
 
     private static List<AdapterRow> EnumerateAdapters()
@@ -429,6 +676,36 @@ public static class WindowsHardware
         public IntPtr Reserved;
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    private struct DevPropKey
+    {
+        public Guid Fmtid;
+        public uint Pid;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct D3dkmtOpenAdapterFromLuid
+    {
+        public uint AdapterLuidLow;
+        public int AdapterLuidHigh;
+        public uint AdapterHandle;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct D3dkmtCloseAdapter
+    {
+        public uint AdapterHandle;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct D3dkmtQueryAdapterInfo
+    {
+        public uint AdapterHandle;
+        public uint Type;
+        public IntPtr PrivateDriverData;
+        public uint PrivateDriverDataSize;
+    }
+
     [UnmanagedFunctionPointer(CallingConvention.StdCall)]
     private delegate int EnumAdapters1(IntPtr self, uint index, out IntPtr adapter);
 
@@ -444,8 +721,20 @@ public static class WindowsHardware
     [DllImport("dxgi.dll")]
     private static extern int CreateDXGIFactory1(ref Guid riid, out IntPtr factory);
 
+    [DllImport("gdi32.dll")]
+    private static extern int D3DKMTOpenAdapterFromLuid(ref D3dkmtOpenAdapterFromLuid open);
+
+    [DllImport("gdi32.dll")]
+    private static extern int D3DKMTCloseAdapter(ref D3dkmtCloseAdapter close);
+
+    [DllImport("gdi32.dll")]
+    private static extern int D3DKMTQueryAdapterInfo(ref D3dkmtQueryAdapterInfo info);
+
     [DllImport("setupapi.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern IntPtr SetupDiGetClassDevs(ref Guid classGuid, string? enumerator, IntPtr hwndParent, uint flags);
+
+    [DllImport("setupapi.dll", CharSet = CharSet.Unicode, EntryPoint = "SetupDiGetClassDevsW", SetLastError = true)]
+    private static extern IntPtr SetupDiGetClassDevsAll(IntPtr classGuid, string? enumerator, IntPtr hwndParent, uint flags);
 
     [DllImport("setupapi.dll", SetLastError = true)]
     private static extern bool SetupDiEnumDeviceInfo(IntPtr deviceInfoSet, uint memberIndex, ref SpDevInfoData deviceInfoData);
@@ -459,6 +748,17 @@ public static class WindowsHardware
         byte[] propertyBuffer,
         uint propertyBufferSize,
         out uint requiredSize);
+
+    [DllImport("setupapi.dll", CharSet = CharSet.Unicode, EntryPoint = "SetupDiGetDevicePropertyW", SetLastError = true)]
+    private static extern bool SetupDiGetDeviceProperty(
+        IntPtr deviceInfoSet,
+        ref SpDevInfoData deviceInfoData,
+        ref DevPropKey propertyKey,
+        out uint propertyType,
+        byte[] propertyBuffer,
+        uint propertyBufferSize,
+        out uint requiredSize,
+        uint flags);
 
     [DllImport("setupapi.dll", SetLastError = true)]
     private static extern bool SetupDiDestroyDeviceInfoList(IntPtr deviceInfoSet);

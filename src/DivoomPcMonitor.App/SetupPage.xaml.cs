@@ -6,7 +6,7 @@ namespace DivoomPcMonitor;
 
 public sealed partial class SetupPage : Page
 {
-    private readonly DivoomDeviceClient _cloud = new();
+    private readonly DivoomDeviceClient _cloud = new(Session.Current.Log.Info);
     private IReadOnlyList<LanDevice> _devices = [];
     private IReadOnlyList<LcdGroupInfo> _groups = [];
     private IReadOnlyList<FixedDrive> _drives = [];
@@ -49,13 +49,30 @@ public sealed partial class SetupPage : Page
         BeginWizard();
     }
 
+    private void Cancel_Click(object sender, RoutedEventArgs e)
+    {
+        _wizard = false;
+        Notice.IsOpen = false;
+        ShowSummary();
+    }
+
     private void BeginWizard()
     {
         _wizard = true;
         _stepIndex = 0;
+        _device = null;
+        _group = null;
+        _lcdIndex = 0;
+        _lcdClockId = "625";
+        _lcdIndependence = "0";
+        _pixoo = false;
+        _allDrives = false;
+        _driveIndex = 0;
+        _gpuIndex = 0;
         SummaryView.Visibility = Visibility.Collapsed;
         WizardView.Visibility = Visibility.Visible;
         RecreateButton.Visibility = Visibility.Collapsed;
+        CancelButton.Visibility = Session.Current.HasConfig ? Visibility.Visible : Visibility.Collapsed;
         BackButton.Visibility = Visibility.Visible;
         NextButton.Visibility = Visibility.Visible;
         _ = LoadDevicesAsync();
@@ -72,6 +89,7 @@ public sealed partial class SetupPage : Page
         SummaryView.Visibility = Visibility.Visible;
         WizardView.Visibility = Visibility.Collapsed;
         RecreateButton.Visibility = Visibility.Visible;
+        CancelButton.Visibility = Visibility.Collapsed;
         BackButton.Visibility = Visibility.Collapsed;
         NextButton.Visibility = Visibility.Collapsed;
         StepTitle.Text = "Current configuration";
@@ -121,22 +139,27 @@ public sealed partial class SetupPage : Page
         SetBusy(true, "Looking for Divoom devices on this network…");
         try
         {
-            _devices = await _cloud.ListDevicesAsync(CancellationToken.None);
-            _drives = WindowsHardware.ListFixedDrives();
-            _gpus = WindowsHardware.ListGpus();
-            if (_devices.Count == 1)
+            var devicesTask = _cloud.ListDevicesAsync(CancellationToken.None);
+            var hardwareTask = Task.Run(static () => (Drives: WindowsHardware.ListFixedDrives(), Gpus: WindowsHardware.ListGpus()));
+            _devices = await devicesTask;
+            var hardware = await hardwareTask;
+            _drives = hardware.Drives;
+            _gpus = hardware.Gpus;
+            if (_devices.Count > 0)
             {
                 _device = _devices[0];
             }
 
-            if (_drives.Count == 1)
+            if (_drives.Count > 0)
             {
                 _driveIndex = 0;
             }
 
-            if (_gpus.Count == 1)
+            if (_gpus.Count > 0)
             {
-                _gpuIndex = 0;
+                var preferred = HardwareMath.SelectDefault(_gpus);
+                var preferredIdx = preferred is null ? -1 : _gpus.ToList().IndexOf(preferred);
+                _gpuIndex = preferredIdx >= 0 ? preferredIdx : 0;
             }
 
             Notice.IsOpen = false;
@@ -310,7 +333,22 @@ public sealed partial class SetupPage : Page
                 else
                 {
                     _pixoo = false;
-                    _group = _groups.Count == 1 ? _groups[0] : _group is not null && _groups.Contains(_group) ? _group : null;
+                    if (_groups.Count == 1)
+                    {
+                        if (_groups[0].Faces.Count == 0)
+                        {
+                            ShowError("LcdList is empty.");
+                            return false;
+                        }
+
+                        _group = _groups[0];
+                    }
+                    else
+                    {
+                        _group = _group is not null
+                            ? _groups.FirstOrDefault(g => g.Independence == _group.Independence) ?? _groups[0]
+                            : _groups[0];
+                    }
                 }
 
                 RebuildSteps();
@@ -377,16 +415,16 @@ public sealed partial class SetupPage : Page
 
         var drives = _allDrives ? _drives.Select(drive => drive.DeviceId).ToArray() : [_drives[_driveIndex].DeviceId];
         var gpu = _gpus.Count == 0 ? new GpuCard() : _gpus[Math.Clamp(_gpuIndex, 0, _gpus.Count - 1)];
-        var cpu = WindowsHardware.ReadCpuVendor();
-        if (cpu.Length == 0)
-        {
-            cpu = "Unknown";
-        }
-
         var path = Session.Current.ConfigPath ?? ConfigLocator.DefaultSavePath(AppContext.BaseDirectory);
         SetBusy(true, "Saving the configuration and selecting the PC Monitor app…");
         try
         {
+            var cpu = await Task.Run(WindowsHardware.ReadCpuVendor);
+            if (cpu.Length == 0)
+            {
+                cpu = "Unknown";
+            }
+
             ConfigStore.Write(path, _device.Id, _device.Ip, _lcdIndependence, _lcdIndex.ToString(), _lcdClockId, drives, cpu, gpu);
             Session.Current.ConfigPath = path;
             var selected = await _cloud.SelectClockAsync(_device.Id, _device.Ip, _lcdIndependence, _lcdIndex.ToString(), _lcdClockId, verbose: true, CancellationToken.None);
@@ -402,11 +440,7 @@ public sealed partial class SetupPage : Page
             Notice.Message = "Configuration saved. The device is showing the PC Monitor app.";
             Notice.IsOpen = true;
             _wizard = false;
-            if (!Session.Current.Monitoring)
-            {
-                Session.Current.Start();
-            }
-
+            Session.Current.Restart();
             Session.Current.RequestNavigate("monitor");
         }
         catch (Exception ex)
@@ -463,6 +497,7 @@ public sealed partial class SetupPage : Page
         Busy.IsActive = busy;
         NextButton.IsEnabled = !busy;
         BackButton.IsEnabled = !busy && _stepIndex > 0;
+        CancelButton.IsEnabled = !busy;
         if (!string.IsNullOrEmpty(title))
         {
             StepTitle.Text = title;

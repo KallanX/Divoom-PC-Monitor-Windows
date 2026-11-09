@@ -66,6 +66,7 @@ public sealed class ThermalZone
 {
     public required string Name { get; init; }
     public double DeciKelvin { get; init; }
+    public string HardwareId { get; init; } = "";
 }
 
 public sealed class ThermalPick
@@ -99,8 +100,8 @@ public static class HardwareMath
     private static readonly Regex EnginePattern = new(
         @"luid_(0x[0-9a-f]{8}_0x[0-9a-f]{8})_phys_\d+_eng_\d+_engtype_([a-z0-9]+)",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
-    private static readonly Regex CpuZonePattern = new(@"cpu|pkg|soc|core|tdie|tctl|processor", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
-    private static readonly Regex GpuZonePattern = new(@"gpu|gfx|adreno|kgsl|video", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    private static readonly Regex CpuZonePattern = new(@"cpu|pkg|soc|core|tdie|tctl|processor|qcom0c58|qcom0c59|qcom0d01|ven_qcom&dev_0c58|ven_qcom&dev_0c59|ven_qcom&dev_0d01", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    private static readonly Regex GpuZonePattern = new(@"gpu|gfx|adreno|kgsl|video|qcom0c91|ven_qcom&dev_0c91", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
 
     public static string ShortenPci(string? bdf)
     {
@@ -241,11 +242,62 @@ public static class HardwareMath
                 gpu = new GpuCard();
             }
         }
+        else
+        {
+            gpu = MatchGpu(gpu, gpus);
+        }
 
         return new HardwareSelection
         {
             CpuVendor = cpuVendor,
             Gpu = gpu,
+        };
+    }
+
+    public static GpuCard MatchGpu(GpuCard configured, IReadOnlyList<GpuCard>? gpus)
+    {
+        if (gpus is null || gpus.Count == 0)
+        {
+            return configured;
+        }
+
+        GpuCard? match = null;
+        if (configured.Pci.Length > 0)
+        {
+            match = gpus.FirstOrDefault(card =>
+                card.Pci.Length > 0 && string.Equals(ShortenPci(card.Pci), configured.Pci, StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (match is null && configured.Luid.Length > 0)
+        {
+            match = gpus.FirstOrDefault(card =>
+                card.Luid.Length > 0 && string.Equals(card.Luid, configured.Luid, StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (match is null && configured.Name.Length > 0 && configured.Pci.Length == 0)
+        {
+            match = gpus.FirstOrDefault(card =>
+                string.Equals(card.Name, configured.Name, StringComparison.OrdinalIgnoreCase)
+                && (configured.Vendor.Length == 0 || string.Equals(card.Vendor, configured.Vendor, StringComparison.OrdinalIgnoreCase)));
+        }
+
+        if (match is null && configured.Vendor.Length > 0 && configured.Pci.Length == 0)
+        {
+            match = gpus.FirstOrDefault(card =>
+                string.Equals(card.Vendor, configured.Vendor, StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (match is null)
+        {
+            return configured;
+        }
+
+        return new GpuCard
+        {
+            Vendor = configured.Vendor.Length > 0 ? configured.Vendor : match.Vendor,
+            Pci = configured.Pci.Length > 0 ? configured.Pci : ShortenPci(match.Pci),
+            Name = configured.Name.Length > 0 ? configured.Name : match.Name,
+            Luid = match.Luid.Length > 0 ? match.Luid : configured.Luid,
         };
     }
 
@@ -475,7 +527,10 @@ public static class HardwareMath
             }
 
             var kind = match.Groups[2].Value.ToLowerInvariant();
-            sums[kind] = sums.TryGetValue(kind, out var existing) ? existing + sample.CookedValue : sample.CookedValue;
+            var sampleValue = double.IsNaN(sample.CookedValue) || double.IsInfinity(sample.CookedValue) || sample.CookedValue < 0
+                ? 0.0
+                : sample.CookedValue;
+            sums[kind] = sums.TryGetValue(kind, out var existing) ? existing + sampleValue : sampleValue;
         }
 
         if (!sums.ContainsKey("3d") && !sums.ContainsKey("compute"))
@@ -568,6 +623,7 @@ public static class HardwareMath
         var gpu = string.Equals(role, "Gpu", StringComparison.OrdinalIgnoreCase);
         var pattern = gpu ? GpuZonePattern : CpuZonePattern;
         var valid = new List<ThermalPick>();
+        var named = new List<ThermalPick>();
         if (zones is not null)
         {
             foreach (var zone in zones)
@@ -583,16 +639,20 @@ public static class HardwareMath
                     continue;
                 }
 
-                valid.Add(new ThermalPick
+                var pick = new ThermalPick
                 {
                     Name = zone.Name ?? "",
                     Celsius = (int)Math.Round(celsius.Value),
                     Raw = celsius.Value,
-                });
+                };
+                valid.Add(pick);
+                if (pattern.IsMatch(pick.Name) || (!string.IsNullOrEmpty(zone.HardwareId) && pattern.IsMatch(zone.HardwareId)))
+                {
+                    named.Add(pick);
+                }
             }
         }
 
-        var named = valid.Where(zone => pattern.IsMatch(zone.Name)).ToList();
         IReadOnlyList<ThermalPick> pool;
         if (named.Count > 0)
         {
@@ -704,6 +764,11 @@ public static class HardwareMath
     public static int? IntelUtil(ulong[]? first, ulong[]? second)
     {
         if (first is null || second is null || first.Length < 2 || second.Length < 2)
+        {
+            return null;
+        }
+
+        if (first[0] == 0 && second[0] == 0)
         {
             return null;
         }

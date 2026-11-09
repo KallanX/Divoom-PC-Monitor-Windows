@@ -33,6 +33,8 @@ public partial class App : Application
             {
             }
 
+            _show.Dispose();
+            _mutex.Dispose();
             Exit();
             return;
         }

@@ -10,6 +10,8 @@ public sealed class Session
     private CancellationTokenSource? _cancel;
     private DivoomDeviceClient? _device;
     private int _generation;
+    private int _publishPending;
+    private string? _cycleError;
 
     public static Session Current { get; } = new();
 
@@ -22,6 +24,8 @@ public sealed class Session
     public DisplayReading Reading { get; private set; } = new();
 
     public string Status { get; private set; } = "Not monitoring.";
+
+    public bool HasError { get; private set; }
 
     public bool Monitoring { get; private set; }
 
@@ -83,19 +87,21 @@ public sealed class Session
         engine.Updated += reading =>
         {
             Reading = reading;
-            Status = "Update sent.";
             Publish();
         };
 
+        var cancel = new CancellationTokenSource();
         _engine = engine;
         _device = device;
-        _cancel = new CancellationTokenSource();
+        _cancel = cancel;
+        _cycleError = null;
+        HasError = false;
         Monitoring = true;
         Status = "Collecting the first sample.";
         Publish();
 
         var path = ConfigPath;
-        var token = _cancel.Token;
+        var token = cancel.Token;
         _ = Task.Run(async () =>
         {
             try
@@ -109,9 +115,11 @@ public sealed class Session
             finally
             {
                 device.Dispose();
+                cancel.Dispose();
                 if (generation == Volatile.Read(ref _generation))
                 {
                     Monitoring = false;
+                    HasError = false;
                     Status = "Monitor stopped.";
                     Publish();
                 }
@@ -123,6 +131,8 @@ public sealed class Session
     {
         Interlocked.Increment(ref _generation);
         Monitoring = false;
+        _cycleError = null;
+        HasError = false;
         try
         {
             _cancel?.Cancel();
@@ -133,6 +143,12 @@ public sealed class Session
 
         Status = "Monitor stopped.";
         Publish();
+    }
+
+    public void Restart()
+    {
+        Stop();
+        Start();
     }
 
     public void SetInterval(int seconds)
@@ -173,12 +189,45 @@ public sealed class Session
             }
         }
 
-        if (message.StartsWith("Waiting ", StringComparison.Ordinal) || message.StartsWith("HTTP ", StringComparison.Ordinal) || message.StartsWith("config.env", StringComparison.Ordinal))
+        if (message.StartsWith("Data collection started at ", StringComparison.Ordinal))
         {
+            _cycleError = null;
+        }
+        else if (IsErrorLine(message))
+        {
+            _cycleError = message;
+            HasError = true;
             Status = message;
+        }
+        else if (message.StartsWith("HTTP Post - OKAY!", StringComparison.Ordinal))
+        {
+            _cycleError = null;
+            HasError = false;
+            Status = message;
+        }
+        else if (message.StartsWith("Waiting ", StringComparison.Ordinal))
+        {
+            if (_cycleError is not null)
+            {
+                HasError = true;
+                Status = $"{_cycleError} ({message})";
+            }
+            else
+            {
+                HasError = false;
+                Status = message;
+            }
         }
 
         Publish();
+    }
+
+    private static bool IsErrorLine(string message)
+    {
+        return message.Contains("ERROR!", StringComparison.Ordinal)
+            || message.StartsWith("config.env", StringComparison.Ordinal)
+            || message.StartsWith("Configuration file not found:", StringComparison.Ordinal)
+            || message.StartsWith("Data collection failed:", StringComparison.Ordinal);
     }
 
     private void Publish()
@@ -190,6 +239,18 @@ public sealed class Session
             return;
         }
 
-        queue.TryEnqueue(() => Changed?.Invoke());
+        if (Interlocked.CompareExchange(ref _publishPending, 1, 0) != 0)
+        {
+            return;
+        }
+
+        if (!queue.TryEnqueue(() =>
+        {
+            Interlocked.Exchange(ref _publishPending, 0);
+            Changed?.Invoke();
+        }))
+        {
+            Interlocked.Exchange(ref _publishPending, 0);
+        }
     }
 }

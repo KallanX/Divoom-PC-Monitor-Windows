@@ -7,6 +7,9 @@ namespace DivoomPcMonitor;
 public sealed partial class MonitorPage : Page
 {
     private bool _ready;
+    private string? _cachedConfigPath;
+    private DateTime _cachedConfigWriteUtc;
+    private string? _cachedSubtitle;
 
     public MonitorPage()
     {
@@ -48,7 +51,7 @@ public sealed partial class MonitorPage : Page
         DiskValue.Text = reading.DiskText;
         DiskName.Text = string.IsNullOrEmpty(reading.DiskName) ? "" : reading.DiskName;
         StatusBar.Message = session.Status;
-        StatusBar.Severity = session.Status.Contains("ERROR", StringComparison.OrdinalIgnoreCase)
+        StatusBar.Severity = session.HasError || session.Status.Contains("ERROR", StringComparison.OrdinalIgnoreCase)
             ? InfoBarSeverity.Error
             : session.Monitoring ? InfoBarSeverity.Success : InfoBarSeverity.Informational;
         RunIcon.Symbol = session.Monitoring ? Symbol.Pause : Symbol.Play;
@@ -56,22 +59,37 @@ public sealed partial class MonitorPage : Page
 
         if (session.HasConfig && session.ConfigPath is not null)
         {
-            try
+            var configPath = session.ConfigPath;
+            var writeUtc = File.GetLastWriteTimeUtc(configPath);
+            if (_cachedSubtitle is null || _cachedConfigPath != configPath || _cachedConfigWriteUtc != writeUtc)
             {
-                var config = ConfigStore.Read(session.ConfigPath);
-                Subtitle.Text = "Sending to " + config.DeviceIp + " after each sample. The device shows CPU, GPU, CPU temperature, GPU temperature, memory, and disk.";
+                _cachedConfigPath = configPath;
+                _cachedConfigWriteUtc = writeUtc;
+                try
+                {
+                    var config = ConfigStore.Read(configPath);
+                    _cachedSubtitle = "Sending to " + config.DeviceIp + " after each sample. The device shows CPU, GPU, CPU temperature, GPU temperature, memory, and disk.";
+                }
+                catch (ConfigException ex)
+                {
+                    _cachedSubtitle = ex.Message;
+                }
             }
-            catch (ConfigException ex)
-            {
-                Subtitle.Text = ex.Message;
-            }
+
+            Subtitle.Text = _cachedSubtitle;
         }
     }
 
     private void IntervalBox_ValueChanged(NumberBox sender, NumberBoxValueChangedEventArgs args)
     {
-        if (!_ready || double.IsNaN(args.NewValue))
+        if (!_ready)
         {
+            return;
+        }
+
+        if (double.IsNaN(args.NewValue))
+        {
+            sender.Value = Session.Current.Settings.IntervalSeconds;
             return;
         }
 
@@ -111,13 +129,23 @@ public sealed partial class MonitorPage : Page
             return;
         }
 
-        if (LoginSwitch.IsOn)
+        try
         {
-            LoginStartup.Enable(path);
+            if (LoginSwitch.IsOn)
+            {
+                LoginStartup.Enable(path);
+            }
+            else
+            {
+                LoginStartup.Disable();
+            }
         }
-        else
+        catch (Exception ex)
         {
-            LoginStartup.Disable();
+            Session.Current.Log.Info("Could not update sign-in startup: " + ex.Message);
+            _ready = false;
+            LoginSwitch.IsOn = LoginStartup.IsEnabled();
+            _ready = true;
         }
     }
 

@@ -13,6 +13,8 @@ public sealed class MonitorEngine : IAsyncDisposable
     private readonly Func<TimeSpan, CancellationToken, Task> _delay;
     private readonly ReadingHold _hold = new();
     private readonly HardwareCache _hardware = new();
+    private readonly object _waitGate = new();
+    private CancellationTokenSource? _waitCancel;
     private int _intervalSeconds = 30;
 
     public MonitorEngine(
@@ -43,7 +45,20 @@ public sealed class MonitorEngine : IAsyncDisposable
                 throw new ArgumentOutOfRangeException(nameof(value), "Interval must be at least 1 second.");
             }
 
-            Volatile.Write(ref _intervalSeconds, value);
+            var previous = Interlocked.Exchange(ref _intervalSeconds, value);
+            if (previous != value)
+            {
+                lock (_waitGate)
+                {
+                    try
+                    {
+                        _waitCancel?.Cancel();
+                    }
+                    catch (ObjectDisposedException)
+                    {
+                    }
+                }
+            }
         }
     }
 
@@ -66,6 +81,10 @@ public sealed class MonitorEngine : IAsyncDisposable
                     _log.Info("Data collection started at " + DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
                     var selection = _hardware.Resolve(config, _log);
                     var raw = await _sensors.MeasureAsync(selection.Gpu, config.HardDrive, cancellationToken).ConfigureAwait(false);
+                    if (raw.GpuUtil is null)
+                    {
+                        _hardware.Invalidate();
+                    }
                     if (raw.CpuTemp is null)
                     {
                         _log.WriteOnce("cpu-temp", "CPU temperature unavailable.");
@@ -113,13 +132,33 @@ public sealed class MonitorEngine : IAsyncDisposable
 
                 var interval = IntervalSeconds;
                 _log.Info($"Waiting {interval} seconds before the next update.");
+                using var waitCancel = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                lock (_waitGate)
+                {
+                    _waitCancel = waitCancel;
+                }
+
                 try
                 {
-                    await _delay(TimeSpan.FromSeconds(interval), cancellationToken).ConfigureAwait(false);
+                    await _delay(TimeSpan.FromSeconds(interval), waitCancel.Token).ConfigureAwait(false);
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {
                     break;
+                }
+                catch (OperationCanceledException)
+                {
+                    // IntervalSeconds changed while waiting; start the next update with the new interval.
+                }
+                finally
+                {
+                    lock (_waitGate)
+                    {
+                        if (ReferenceEquals(_waitCancel, waitCancel))
+                        {
+                            _waitCancel = null;
+                        }
+                    }
                 }
             }
         }
@@ -141,6 +180,12 @@ public sealed class MonitorEngine : IAsyncDisposable
         private string? _key;
         private HardwareSelection? _value;
 
+        public void Invalidate()
+        {
+            _key = null;
+            _value = null;
+        }
+
         public HardwareSelection Resolve(MonitorConfig config, MonitorLog log)
         {
             if (_value is not null && _key == config.HardwareKey)
@@ -148,12 +193,7 @@ public sealed class MonitorEngine : IAsyncDisposable
                 return _value;
             }
 
-            IReadOnlyList<GpuCard>? gpus = null;
-            if (HardwareMath.FromConfig(config) is null)
-            {
-                gpus = WindowsHardware.ListGpus();
-            }
-
+            var gpus = WindowsHardware.ListGpus();
             _key = config.HardwareKey;
             _value = HardwareMath.Resolve(
                 config,

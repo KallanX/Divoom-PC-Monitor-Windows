@@ -66,6 +66,8 @@ public sealed class MonitorLog
         WriteOnce(token[..split], token[(split + 1)..]);
     }
 
+    private const long MaxLogBytes = 5 * 1024 * 1024;
+
     private void Append(string message)
     {
         var path = _file;
@@ -76,8 +78,17 @@ public sealed class MonitorLog
 
         try
         {
-            var line = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + " - " + message;
-            File.AppendAllText(path, line + Environment.NewLine);
+            var line = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss") + " - " + message + Environment.NewLine;
+            lock (_gate)
+            {
+                var info = new FileInfo(path);
+                if (info.Exists && info.Length > MaxLogBytes)
+                {
+                    File.Move(path, path + ".old", overwrite: true);
+                }
+
+                File.AppendAllText(path, line);
+            }
         }
         catch (Exception)
         {

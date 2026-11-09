@@ -65,8 +65,19 @@ public sealed partial class MainWindow : Window
 
     public void BringToFront()
     {
+        if (AppWindow.Presenter is OverlappedPresenter { State: OverlappedPresenterState.Minimized } presenter)
+        {
+            presenter.Restore();
+        }
+
         AppWindow.Show();
         Activate();
+        var hwnd = WindowNative.GetWindowHandle(this);
+        if (hwnd != IntPtr.Zero)
+        {
+            SetForegroundWindow(hwnd);
+        }
+
         ApplyTitle();
     }
 
@@ -83,6 +94,9 @@ public sealed partial class MainWindow : Window
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     private static extern bool SetWindowText(IntPtr hWnd, string text);
+
+    [DllImport("user32.dll")]
+    private static extern bool SetForegroundWindow(IntPtr hWnd);
 
     public void ShowSetup()
     {

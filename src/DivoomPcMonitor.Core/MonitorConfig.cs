@@ -324,6 +324,8 @@ public static class ConfigLocator
 
 public sealed class AppSettings
 {
+    private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
+
     public int IntervalSeconds { get; set; } = 30;
     public bool DebugLog { get; set; }
 
@@ -360,7 +362,7 @@ public sealed class AppSettings
         }
 
         Directory.CreateDirectory(ConfigLocator.LocalFolder());
-        var json = JsonSerializer.Serialize(this, new JsonSerializerOptions { WriteIndented = true });
+        var json = JsonSerializer.Serialize(this, JsonOptions);
         File.WriteAllText(FilePath, json);
     }
 }

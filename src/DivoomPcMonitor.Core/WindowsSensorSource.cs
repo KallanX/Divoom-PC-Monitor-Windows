@@ -20,14 +20,18 @@ public sealed class WindowsSensorSource : ISensorSource
     public async Task<RawSample> MeasureAsync(GpuCard gpu, IReadOnlyList<string> drives, CancellationToken cancellationToken)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
+        var hasDrives = drives.Count > 0;
         Dictionary<string, DiskSample>? diskBefore = null;
-        try
+        if (hasDrives)
         {
-            diskBefore = WindowsHardware.DiskSnapshot();
-        }
-        catch (Exception ex)
-        {
-            _log.WriteOnce("disk-sample", "Disk counters are unavailable: " + ex.Message);
+            try
+            {
+                diskBefore = WindowsHardware.DiskSnapshot();
+            }
+            catch (Exception ex)
+            {
+                _log.WriteOnce("disk-sample", "Disk counters are unavailable: " + ex.Message);
+            }
         }
 
         long[]? cpuBefore = null;
@@ -42,10 +46,17 @@ public sealed class WindowsSensorSource : ISensorSource
 
         _pdh.EnsureOpen(_log);
         _pdh.Collect();
-        ulong[]? intelBaseline = null;
-        if (string.Equals(gpu.Vendor.Trim(), "Intel", StringComparison.OrdinalIgnoreCase))
+        IReadOnlyList<(IntPtr Engine, ulong[] Stats)>? intelBaseline = null;
+        var vendorName = gpu.Vendor.Trim();
+        if (string.Equals(vendorName, "Intel", StringComparison.OrdinalIgnoreCase))
         {
-            intelBaseline = _intel.Begin(_log);
+            intelBaseline = _intel.Begin(gpu, _log);
+        }
+
+        Task<NvidiaRow>? nvidiaTask = null;
+        if (string.Equals(vendorName, "NVIDIA", StringComparison.OrdinalIgnoreCase))
+        {
+            nvidiaTask = QueryNvidiaAsync(gpu, cancellationToken);
         }
 
         await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken).ConfigureAwait(false);
@@ -76,6 +87,15 @@ public sealed class WindowsSensorSource : ISensorSource
 
         var cpuTemp = vendor.CpuTemp;
         string? cpuSource = cpuTemp is null ? null : "the AMD display library";
+        if (cpuTemp is null && !string.Equals(vendorName, "AMD", StringComparison.OrdinalIgnoreCase))
+        {
+            cpuTemp = _amd.ReadCpuTemp();
+            if (cpuTemp is not null)
+            {
+                cpuSource = "the AMD display library";
+            }
+        }
+
         if (cpuTemp is null)
         {
             var cpuZone = HardwareMath.SelectThermal(zones, "Cpu");
@@ -87,17 +107,20 @@ public sealed class WindowsSensorSource : ISensorSource
         }
 
         Dictionary<string, DiskSample>? diskAfter = null;
-        try
+        if (hasDrives && diskBefore is not null)
         {
-            diskAfter = WindowsHardware.DiskSnapshot();
-            _log.Clear("disk-sample");
-        }
-        catch (Exception ex)
-        {
-            _log.WriteOnce("disk-sample", "Disk counters are unavailable: " + ex.Message);
+            try
+            {
+                diskAfter = WindowsHardware.DiskSnapshot();
+                _log.Clear("disk-sample");
+            }
+            catch (Exception ex)
+            {
+                _log.WriteOnce("disk-sample", "Disk counters are unavailable: " + ex.Message);
+            }
         }
 
-        var disk = HardwareMath.BusierLogicalDisk(diskBefore, diskAfter, drives);
+        var disk = hasDrives ? HardwareMath.BusierLogicalDisk(diskBefore, diskAfter, drives) : new DiskRank();
         int? memory = null;
         try
         {
@@ -117,8 +140,19 @@ public sealed class WindowsSensorSource : ISensorSource
             _log.Clear("mem");
         }
 
+        NvidiaRow? nvidia = null;
+        if (nvidiaTask is not null)
+        {
+            nvidia = await nvidiaTask.ConfigureAwait(false);
+        }
+
         var vendorTemp = vendor.Temp;
-        if (vendorTemp is null)
+        if (vendorTemp is null && nvidia?.Temp is null)
+        {
+            vendorTemp = WindowsHardware.ReadD3dkmtGpuTemp(gpu.Luid);
+        }
+
+        if (vendorTemp is null && nvidia?.Temp is null)
         {
             var gpuZone = HardwareMath.SelectThermal(zones, "Gpu");
             if (gpuZone is not null)
@@ -126,15 +160,17 @@ public sealed class WindowsSensorSource : ISensorSource
                 vendorTemp = gpuZone.Celsius;
                 _log.WriteOnce("gpu-acpi", "GPU temperature from ACPI thermal zone " + gpuZone.Name + ".");
             }
+            else
+            {
+                _log.Clear("gpu-acpi");
+            }
         }
-
-        NvidiaRow? nvidia = null;
-        if (string.Equals(gpu.Vendor.Trim(), "NVIDIA", StringComparison.OrdinalIgnoreCase))
+        else
         {
-            nvidia = QueryNvidia(gpu);
+            _log.Clear("gpu-acpi");
         }
 
-        if (gpu.Vendor.Trim().Length > 0)
+        if (vendorName.Length > 0)
         {
             _log.Clear("gpu-missing");
         }
@@ -145,6 +181,10 @@ public sealed class WindowsSensorSource : ISensorSource
             new VendorReading { Util = vendor.Util, Temp = vendorTemp, CpuTemp = vendor.CpuTemp },
             nvidia,
             _log.OnceToken);
+        if (combined.Temp is not null)
+        {
+            _log.Clear("qcom-temp");
+        }
 
         return new RawSample
         {
@@ -172,7 +212,7 @@ public sealed class WindowsSensorSource : ISensorSource
         _intel.Dispose();
     }
 
-    private VendorReading ReadVendor(GpuCard gpu, ulong[]? intelBaseline)
+    private VendorReading ReadVendor(GpuCard gpu, IReadOnlyList<(IntPtr Engine, ulong[] Stats)>? intelBaseline)
     {
         var vendor = gpu.Vendor.Trim();
         try
@@ -180,7 +220,7 @@ public sealed class WindowsSensorSource : ISensorSource
             return vendor switch
             {
                 "AMD" => _amd.Read(gpu, _log),
-                "Intel" => _intel.Read(intelBaseline, _log),
+                "Intel" => _intel.Read(gpu, intelBaseline, _log),
                 _ => new VendorReading(),
             };
         }
@@ -191,7 +231,7 @@ public sealed class WindowsSensorSource : ISensorSource
         }
     }
 
-    private NvidiaRow QueryNvidia(GpuCard gpu)
+    private async Task<NvidiaRow> QueryNvidiaAsync(GpuCard gpu, CancellationToken cancellationToken)
     {
         var executable = WindowsHardware.FindNvidiaSmi();
         if (executable is null)
@@ -214,32 +254,28 @@ public sealed class WindowsSensorSource : ISensorSource
         {
             using var process = new Process { StartInfo = start };
             process.Start();
-            var stdoutTask = process.StandardOutput.ReadToEndAsync();
-            var stderrTask = process.StandardError.ReadToEndAsync();
-            if (!process.WaitForExit(10000))
+            var stdoutTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
+            var stderrTask = process.StandardError.ReadToEndAsync(cancellationToken);
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeoutCts.CancelAfter(TimeSpan.FromSeconds(10));
+            try
             {
-                try
-                {
-                    process.Kill(entireProcessTree: true);
-                }
-                catch (Exception)
-                {
-                    try
-                    {
-                        process.Kill();
-                    }
-                    catch (Exception)
-                    {
-                    }
-                }
-
+                await process.WaitForExitAsync(timeoutCts.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                KillProcessSafe(process);
                 _log.WriteOnce("timeout-nvidia-smi", "nvidia-smi timed out after 10s.");
                 return new NvidiaRow { Status = "missing" };
             }
+            catch (OperationCanceledException)
+            {
+                KillProcessSafe(process);
+                throw;
+            }
 
-            process.WaitForExit();
-            var stdout = stdoutTask.GetAwaiter().GetResult();
-            var stderr = stderrTask.GetAwaiter().GetResult();
+            var stdout = await stdoutTask.ConfigureAwait(false);
+            var stderr = await stderrTask.ConfigureAwait(false);
             if (process.ExitCode != 0)
             {
                 var detail = !string.IsNullOrWhiteSpace(stderr) ? stderr.Trim() : !string.IsNullOrWhiteSpace(stdout) ? stdout.Trim() : "exit " + process.ExitCode.ToString(CultureInfo.InvariantCulture);
@@ -267,10 +303,28 @@ public sealed class WindowsSensorSource : ISensorSource
 
             return parsed;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
             _log.WriteOnce("fail-nvidia-smi", "nvidia-smi failed: " + ex.Message);
             return new NvidiaRow { Status = "missing" };
+        }
+    }
+
+    private static void KillProcessSafe(Process process)
+    {
+        try
+        {
+            process.Kill(entireProcessTree: true);
+        }
+        catch (Exception)
+        {
+            try
+            {
+                process.Kill();
+            }
+            catch (Exception)
+            {
+            }
         }
     }
 }
@@ -279,9 +333,11 @@ internal sealed class PdhSession : IDisposable
 {
     private const uint FmtDouble = 0x00000200;
     private IntPtr _query;
+    private IntPtr _gpuAll;
     private IntPtr _gpu3d;
     private IntPtr _gpuCompute;
     private IntPtr _thermal;
+    private IntPtr _thermalFallback;
     private bool _ready;
     private bool _tried;
 
@@ -300,10 +356,16 @@ internal sealed class PdhSession : IDisposable
             return;
         }
 
-        _gpu3d = Add(@"\GPU Engine(*engtype_3d)\Utilization Percentage");
-        _gpuCompute = Add(@"\GPU Engine(*engtype_compute)\Utilization Percentage");
+        _gpuAll = Add(@"\GPU Engine(*)\Utilization Percentage");
+        if (_gpuAll == IntPtr.Zero)
+        {
+            _gpu3d = Add(@"\GPU Engine(*engtype_3d)\Utilization Percentage");
+            _gpuCompute = Add(@"\GPU Engine(*engtype_compute)\Utilization Percentage");
+        }
+
         _thermal = Add(@"\Thermal Zone Information(*)\High Precision Temperature");
-        if (_gpu3d == IntPtr.Zero && _gpuCompute == IntPtr.Zero && _thermal == IntPtr.Zero)
+        _thermalFallback = Add(@"\Thermal Zone Information(*)\Temperature");
+        if (_gpuAll == IntPtr.Zero && _gpu3d == IntPtr.Zero && _gpuCompute == IntPtr.Zero && _thermal == IntPtr.Zero && _thermalFallback == IntPtr.Zero)
         {
             log.WriteOnce("pdh-open", "Windows performance counters have no GPU engine or thermal zone data.");
             Dispose();
@@ -331,6 +393,15 @@ internal sealed class PdhSession : IDisposable
             return items;
         }
 
+        if (_gpuAll != IntPtr.Zero)
+        {
+            items.AddRange(Read(_gpuAll));
+            if (items.Count > 0)
+            {
+                return items;
+            }
+        }
+
         foreach (var sample in Read(_gpu3d))
         {
             items.Add(sample);
@@ -352,9 +423,28 @@ internal sealed class PdhSession : IDisposable
             return zones;
         }
 
+        var hardwareIds = WindowsHardware.ReadThermalZoneHardwareIds();
         foreach (var sample in Read(_thermal))
         {
-            zones.Add(new ThermalZone { Name = sample.InstanceName, DeciKelvin = sample.CookedValue });
+            zones.Add(new ThermalZone
+            {
+                Name = sample.InstanceName,
+                DeciKelvin = sample.CookedValue,
+                HardwareId = hardwareIds.TryGetValue(sample.InstanceName, out var hwid) ? hwid : "",
+            });
+        }
+
+        if (zones.Count == 0 && _thermalFallback != IntPtr.Zero)
+        {
+            foreach (var sample in Read(_thermalFallback))
+            {
+                zones.Add(new ThermalZone
+                {
+                    Name = sample.InstanceName,
+                    DeciKelvin = sample.CookedValue,
+                    HardwareId = hardwareIds.TryGetValue(sample.InstanceName, out var hwid) ? hwid : "",
+                });
+            }
         }
 
         return zones;
@@ -368,9 +458,11 @@ internal sealed class PdhSession : IDisposable
             _query = IntPtr.Zero;
         }
 
+        _gpuAll = IntPtr.Zero;
         _gpu3d = IntPtr.Zero;
         _gpuCompute = IntPtr.Zero;
         _thermal = IntPtr.Zero;
+        _thermalFallback = IntPtr.Zero;
         _ready = false;
     }
 
@@ -388,48 +480,61 @@ internal sealed class PdhSession : IDisposable
             return items;
         }
 
+        const int pdhMoreData = unchecked((int)0x800007D2);
+        const int stride = 24;
         uint size = 0;
         uint count = 0;
         PdhGetFormattedCounterArray(counter, FmtDouble, ref size, out count, IntPtr.Zero);
-        if (size < 24 || size > 8_000_000 || count == 0)
+        for (var attempt = 0; attempt < 3; attempt++)
         {
-            return items;
-        }
-
-        var buffer = Marshal.AllocHGlobal((int)size);
-        try
-        {
-            var status = PdhGetFormattedCounterArray(counter, FmtDouble, ref size, out count, buffer);
-            if (status != 0 || count == 0)
+            if (size < stride || size > 8_000_000 || count == 0)
             {
                 return items;
             }
 
-            const int stride = 24;
-            var available = (int)Math.Min(count, size / stride);
-            for (var i = 0; i < available; i++)
+            var allocated = size + (uint)(stride * 16);
+            var buffer = Marshal.AllocHGlobal((int)allocated);
+            try
             {
-                var item = IntPtr.Add(buffer, i * stride);
-                var cstatus = Marshal.ReadInt32(item, 8);
-                if (cstatus is not (0 or 1))
+                size = allocated;
+                var status = PdhGetFormattedCounterArray(counter, FmtDouble, ref size, out count, buffer);
+                if (status == pdhMoreData)
                 {
                     continue;
                 }
 
-                var namePtr = Marshal.ReadIntPtr(item, 0);
-                var name = namePtr == IntPtr.Zero ? "" : Marshal.PtrToStringUni(namePtr) ?? "";
-                if (name.Length == 0)
+                if (status != 0 || count == 0)
                 {
-                    continue;
+                    return items;
                 }
 
-                var value = BitConverter.Int64BitsToDouble(Marshal.ReadInt64(item, 16));
-                items.Add(new EngineSample { InstanceName = name, CookedValue = value });
+                var available = (int)Math.Min(count, allocated / stride);
+                for (var i = 0; i < available; i++)
+                {
+                    var item = IntPtr.Add(buffer, i * stride);
+                    var cstatus = Marshal.ReadInt32(item, 8);
+                    if (cstatus is not (0 or 1))
+                    {
+                        continue;
+                    }
+
+                    var namePtr = Marshal.ReadIntPtr(item, 0);
+                    var name = namePtr == IntPtr.Zero ? "" : Marshal.PtrToStringUni(namePtr) ?? "";
+                    if (name.Length == 0)
+                    {
+                        continue;
+                    }
+
+                    var value = BitConverter.Int64BitsToDouble(Marshal.ReadInt64(item, 16));
+                    items.Add(new EngineSample { InstanceName = name, CookedValue = value });
+                }
+
+                return items;
             }
-        }
-        finally
-        {
-            Marshal.FreeHGlobal(buffer);
+            finally
+            {
+                Marshal.FreeHGlobal(buffer);
+            }
         }
 
         return items;
@@ -530,6 +635,38 @@ internal sealed class AmdLibrary : IDisposable
         };
     }
 
+    public int? ReadCpuTemp()
+    {
+        try
+        {
+            EnsureOpen(null);
+            if (!_ready || _count is null || _info is null || _pmLog is null)
+            {
+                return null;
+            }
+
+            foreach (var adapter in ReadAdapters())
+            {
+                var packed = ReadPmLog(adapter.Index);
+                if (packed is null)
+                {
+                    continue;
+                }
+
+                var temp = HardwareMath.VendorCelsius(Sensor(packed, Cpu));
+                if (temp is not null)
+                {
+                    return temp;
+                }
+            }
+        }
+        catch (Exception)
+        {
+        }
+
+        return null;
+    }
+
     public void Dispose()
     {
         if (_destroy is not null && _context != IntPtr.Zero)
@@ -552,7 +689,7 @@ internal sealed class AmdLibrary : IDisposable
         }
     }
 
-    private void EnsureOpen(MonitorLog log)
+    private void EnsureOpen(MonitorLog? log)
     {
         if (_tried)
         {
@@ -571,14 +708,14 @@ internal sealed class AmdLibrary : IDisposable
             null);
         if (path is null)
         {
-            log.WriteOnce("amd-missing", "AMD display library (atiadlxx.dll) was not found. GPU utilization uses the Windows GPU Engine counters.");
+            log?.WriteOnce("amd-missing", "AMD display library (atiadlxx.dll) was not found. GPU utilization uses the Windows GPU Engine counters.");
             return;
         }
 
         _module = LoadLibrary(path);
         if (_module == IntPtr.Zero)
         {
-            log.WriteOnce("amd-missing", "AMD display library could not be loaded from " + path + ".");
+            log?.WriteOnce("amd-missing", "AMD display library could not be loaded from " + path + ".");
             return;
         }
 
@@ -589,19 +726,21 @@ internal sealed class AmdLibrary : IDisposable
         _pmLog = Bind<AdlPmLog>(_module, "ADL2_New_QueryPMLogData_Get");
         if (create is null || _destroy is null || _count is null || _info is null || _pmLog is null)
         {
-            log.WriteOnce("amd-missing", "AMD display library does not export the performance-log functions.");
+            log?.WriteOnce("amd-missing", "AMD display library does not export the performance-log functions.");
+            Dispose();
             return;
         }
 
         var status = create(Alloc, 1, out _context);
         if (status != 0 || _context == IntPtr.Zero)
         {
-            log.WriteOnce("amd-missing", "AMD display library failed to open (status " + status.ToString(CultureInfo.InvariantCulture) + ").");
+            log?.WriteOnce("amd-missing", "AMD display library failed to open (status " + status.ToString(CultureInfo.InvariantCulture) + ").");
+            Dispose();
             return;
         }
 
         _ready = true;
-        log.Clear("amd-missing");
+        log?.Clear("amd-missing");
     }
 
     private List<AmdAdapter> ReadAdapters()
@@ -626,6 +765,7 @@ internal sealed class AmdLibrary : IDisposable
                 return list;
             }
 
+            var seenPci = new HashSet<(int Bus, int Device, int Function)>();
             var reported = Marshal.ReadInt32(buffer, 0);
             var step = reported is >= 280 and <= stride ? reported : stride;
             for (var i = 0; i < count; i++)
@@ -636,10 +776,13 @@ internal sealed class AmdLibrary : IDisposable
                 var function = Marshal.ReadInt32(item, 272);
                 if (bus is < 0 or > 255 || device is < 0 or > 31 || function is < 0 or > 7)
                 {
-                    bus = -1;
+                    continue;
                 }
 
-                list.Add(new AmdAdapter(Marshal.ReadInt32(item, 4), bus, device, function));
+                if (seenPci.Add((bus, device, function)))
+                {
+                    list.Add(new AmdAdapter(Marshal.ReadInt32(item, 4), bus, device, function));
+                }
             }
         }
         finally
@@ -781,9 +924,10 @@ internal sealed class IntelLibrary : IDisposable
 {
     private IntPtr _module;
     private IntPtr _api;
-    private IntPtr _sensor;
-    private IntPtr _engine;
+    private List<IntelDevice> _devices = [];
     private CtlClose? _close;
+    private CtlDeviceProps? _deviceProps;
+    private CtlPciProps? _pciProps;
     private CtlEnum? _enumTemps;
     private CtlTempProps? _tempProps;
     private CtlTempState? _tempState;
@@ -793,18 +937,34 @@ internal sealed class IntelLibrary : IDisposable
     private bool _tried;
     private bool _ready;
 
-    public ulong[]? Begin(MonitorLog log)
+    public IReadOnlyList<(IntPtr Engine, ulong[] Stats)>? Begin(GpuCard gpu, MonitorLog log)
     {
         EnsureOpen(log);
-        if (!_ready || _engine == IntPtr.Zero || _activity is null)
+        if (!_ready || _activity is null)
         {
             return null;
         }
 
-        return ReadEngine(_activity, _engine);
+        var selected = SelectDevice(gpu, log);
+        if (selected is null)
+        {
+            return null;
+        }
+
+        var list = new List<(IntPtr Engine, ulong[] Stats)>();
+        foreach (var engine in selected.Engines)
+        {
+            var stats = ReadEngine(_activity, engine);
+            if (stats is not null)
+            {
+                list.Add((engine, stats));
+            }
+        }
+
+        return list.Count > 0 ? list : null;
     }
 
-    public VendorReading Read(ulong[]? baseline, MonitorLog log)
+    public VendorReading Read(GpuCard gpu, IReadOnlyList<(IntPtr Engine, ulong[] Stats)>? baseline, MonitorLog log)
     {
         EnsureOpen(log);
         if (!_ready)
@@ -812,16 +972,43 @@ internal sealed class IntelLibrary : IDisposable
             return new VendorReading();
         }
 
-        int? temp = null;
-        if (_sensor != IntPtr.Zero && _tempState is not null && _tempState(_sensor, out var celsius) == 0)
+        var selected = SelectDevice(gpu, log);
+        if (selected is null)
         {
-            temp = HardwareMath.VendorCelsius(celsius);
+            return new VendorReading();
+        }
+
+        int? temp = null;
+        if (_tempState is not null)
+        {
+            foreach (var sensor in selected.Sensors)
+            {
+                if (_tempState(sensor, out var celsius) == 0)
+                {
+                    temp = HardwareMath.VendorCelsius(celsius);
+                    if (temp is not null)
+                    {
+                        break;
+                    }
+                }
+            }
         }
 
         int? util = null;
-        if (_engine != IntPtr.Zero && _activity is not null)
+        if (_activity is not null && baseline is not null)
         {
-            util = HardwareMath.IntelUtil(baseline, ReadEngine(_activity, _engine));
+            foreach (var (engine, first) in baseline)
+            {
+                var current = ReadEngine(_activity, engine);
+                if (current is not null)
+                {
+                    util = HardwareMath.IntelUtil(first, current);
+                    if (util is not null)
+                    {
+                        break;
+                    }
+                }
+            }
         }
 
         return new VendorReading { Util = util, Temp = temp };
@@ -841,6 +1028,7 @@ internal sealed class IntelLibrary : IDisposable
         }
 
         _api = IntPtr.Zero;
+        _devices = [];
         _ready = false;
         if (_module != IntPtr.Zero)
         {
@@ -878,6 +1066,8 @@ internal sealed class IntelLibrary : IDisposable
         var init = Bind<CtlInit>(_module, "ctlInit");
         _close = Bind<CtlClose>(_module, "ctlClose");
         var enumDevices = Bind<CtlEnum>(_module, "ctlEnumerateDevices");
+        _deviceProps = Bind<CtlDeviceProps>(_module, "ctlGetDeviceProperties");
+        _pciProps = Bind<CtlPciProps>(_module, "ctlPciGetProperties");
         _enumTemps = Bind<CtlEnum>(_module, "ctlEnumTemperatureSensors");
         _tempProps = Bind<CtlTempProps>(_module, "ctlTemperatureGetProperties");
         _tempState = Bind<CtlTempState>(_module, "ctlTemperatureGetState");
@@ -887,6 +1077,7 @@ internal sealed class IntelLibrary : IDisposable
         if (init is null || enumDevices is null)
         {
             log.WriteOnce("intel-missing", "Intel Graphics Control Library does not export ctlInit.");
+            Dispose();
             return;
         }
 
@@ -901,75 +1092,247 @@ internal sealed class IntelLibrary : IDisposable
         if (status != 0 || _api == IntPtr.Zero)
         {
             log.WriteOnce("intel-missing", "Intel Graphics Control Library failed to open (status " + status.ToString(CultureInfo.InvariantCulture) + ").");
+            Dispose();
             return;
         }
 
-        var devices = Enumerate(enumDevices, _api);
-        if (devices.Count == 0)
+        var handles = Enumerate(enumDevices, _api);
+        if (handles.Count == 0)
         {
             log.WriteOnce("intel-missing", "Intel Graphics Control Library did not list a GPU.");
+            Dispose();
             return;
         }
 
-        if (devices.Count > 1)
+        var list = new List<IntelDevice>();
+        foreach (var handle in handles)
         {
-            log.WriteOnce("intel-multi", "More than one Intel GPU is present, so Intel Graphics Control Library readings are skipped. Utilization uses the Windows GPU Engine counters for the selected adapter.");
-            return;
+            list.Add(BuildDevice(handle));
         }
 
-        var device = devices[0];
+        _devices = list;
+        _ready = true;
+        log.Clear("intel-missing");
+    }
+
+    private IntelDevice BuildDevice(IntPtr handle)
+    {
+        var (name, luid, isIntegrated) = ReadAdapterIdentity(handle);
+        var pci = ReadAdapterPci(handle);
+
+        var orderedSensors = new List<IntPtr>();
         if (_enumTemps is not null && _tempProps is not null && _tempState is not null)
         {
-            var sensors = Enumerate(_enumTemps, device);
-            var fallback = IntPtr.Zero;
+            var sensors = Enumerate(_enumTemps, handle);
+            var gpuSensors = new List<IntPtr>();
+            var globalSensors = new List<IntPtr>();
+            var otherSensors = new List<IntPtr>();
             foreach (var sensor in sensors)
             {
                 var type = ReadTempType(sensor);
                 if (type == 1)
                 {
-                    _sensor = sensor;
-                    break;
+                    gpuSensors.Add(sensor);
                 }
-
-                if (type == 0 && fallback == IntPtr.Zero)
+                else if (type == 0)
                 {
-                    fallback = sensor;
+                    globalSensors.Add(sensor);
+                }
+                else if (type is not (2 or 5))
+                {
+                    otherSensors.Add(sensor);
                 }
             }
 
-            if (_sensor == IntPtr.Zero)
-            {
-                _sensor = fallback;
-            }
+            orderedSensors.AddRange(gpuSensors);
+            orderedSensors.AddRange(globalSensors);
+            orderedSensors.AddRange(otherSensors);
         }
 
+        var orderedEngines = new List<IntPtr>();
         if (_enumEngines is not null && _engineProps is not null && _activity is not null)
         {
-            var engines = Enumerate(_enumEngines, device);
-            var fallback = IntPtr.Zero;
+            var engines = Enumerate(_enumEngines, handle);
+            var globalEngines = new List<IntPtr>();
+            var renderEngines = new List<IntPtr>();
             foreach (var engine in engines)
             {
                 var type = ReadEngineType(engine);
-                if (type == 1)
+                if (type == 0)
                 {
-                    _engine = engine;
-                    break;
+                    globalEngines.Add(engine);
                 }
-
-                if (type == 0 && fallback == IntPtr.Zero)
+                else if (type == 1)
                 {
-                    fallback = engine;
+                    renderEngines.Add(engine);
                 }
             }
 
-            if (_engine == IntPtr.Zero)
+            orderedEngines.AddRange(globalEngines);
+            orderedEngines.AddRange(renderEngines);
+        }
+
+        return new IntelDevice(handle, name, pci, luid, isIntegrated, orderedSensors, orderedEngines);
+    }
+
+    private IntelDevice? SelectDevice(GpuCard gpu, MonitorLog log)
+    {
+        if (_devices.Count == 0)
+        {
+            return null;
+        }
+
+        if (_devices.Count == 1)
+        {
+            log.Clear("intel-multi");
+            return _devices[0];
+        }
+
+        var wantedPci = HardwareMath.ShortenPci(gpu.Pci);
+        if (wantedPci.Length > 0)
+        {
+            var byPci = _devices.FirstOrDefault(d => d.Pci.Length > 0 && string.Equals(d.Pci, wantedPci, StringComparison.OrdinalIgnoreCase));
+            if (byPci is not null)
             {
-                _engine = fallback;
+                log.Clear("intel-multi");
+                return byPci;
             }
         }
 
-        _ready = true;
-        log.Clear("intel-missing");
+        var wantedLuid = gpu.Luid.Trim();
+        if (wantedLuid.Length > 0)
+        {
+            var byLuid = _devices.FirstOrDefault(d => d.Luid.Length > 0 && string.Equals(d.Luid, wantedLuid, StringComparison.OrdinalIgnoreCase));
+            if (byLuid is not null)
+            {
+                log.Clear("intel-multi");
+                return byLuid;
+            }
+        }
+
+        var wantedName = gpu.Name.Trim();
+        if (wantedName.Length > 0)
+        {
+            var byName = _devices.FirstOrDefault(d => d.Name.Length > 0 && string.Equals(d.Name, wantedName, StringComparison.OrdinalIgnoreCase));
+            if (byName is not null)
+            {
+                log.Clear("intel-multi");
+                return byName;
+            }
+        }
+
+        var discrete = _devices.FirstOrDefault(d => !d.IsIntegrated);
+        if (discrete is not null)
+        {
+            log.Clear("intel-multi");
+            return discrete;
+        }
+
+        return _devices[0];
+    }
+
+    private (string Name, string Luid, bool IsIntegrated) ReadAdapterIdentity(IntPtr handle)
+    {
+        if (_deviceProps is null)
+        {
+            return ("", "", false);
+        }
+
+        const int propSize = 192;
+        var propBuffer = Marshal.AllocHGlobal(propSize);
+        var luidBuffer = Marshal.AllocHGlobal(8);
+        try
+        {
+            for (var i = 0; i < propSize; i++)
+            {
+                Marshal.WriteByte(propBuffer, i, 0);
+            }
+
+            Marshal.WriteInt64(luidBuffer, 0, 0);
+            Marshal.WriteInt32(propBuffer, 0, propSize);
+            Marshal.WriteByte(propBuffer, 4, 0);
+            Marshal.WriteIntPtr(propBuffer, 8, luidBuffer);
+            Marshal.WriteInt32(propBuffer, 16, 8);
+
+            if (_deviceProps(handle, propBuffer) != 0)
+            {
+                return ("", "", false);
+            }
+
+            var luidLow = unchecked((uint)Marshal.ReadInt32(luidBuffer, 0));
+            var luidHigh = unchecked((uint)Marshal.ReadInt32(luidBuffer, 4));
+            var luid = luidLow == 0 && luidHigh == 0
+                ? ""
+                : $"luid_0x{luidHigh:x8}_0x{luidLow:x8}";
+
+            var name = Marshal.PtrToStringAnsi(IntPtr.Add(propBuffer, 88), 100) ?? "";
+            var end = name.IndexOf('\0');
+            if (end >= 0)
+            {
+                name = name[..end];
+            }
+
+            var flags = unchecked((uint)Marshal.ReadInt32(propBuffer, 188));
+            var isIntegrated = (flags & 1) != 0;
+            return (name.Trim(), luid, isIntegrated);
+        }
+        catch (Exception)
+        {
+            return ("", "", false);
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(luidBuffer);
+            Marshal.FreeHGlobal(propBuffer);
+        }
+    }
+
+    private string ReadAdapterPci(IntPtr handle)
+    {
+        if (_pciProps is null)
+        {
+            return "";
+        }
+
+        const int size = 64;
+        var buffer = Marshal.AllocHGlobal(size);
+        try
+        {
+            for (var i = 0; i < size; i++)
+            {
+                Marshal.WriteByte(buffer, i, 0);
+            }
+
+            Marshal.WriteInt32(buffer, 0, size);
+            Marshal.WriteByte(buffer, 4, 0);
+            Marshal.WriteInt32(buffer, 8, 24);
+            Marshal.WriteByte(buffer, 12, 0);
+            Marshal.WriteInt32(buffer, 32, 24);
+            Marshal.WriteByte(buffer, 36, 0);
+
+            if (_pciProps(handle, buffer) != 0)
+            {
+                return "";
+            }
+
+            var bus = Marshal.ReadInt32(buffer, 20);
+            var device = Marshal.ReadInt32(buffer, 24);
+            var function = Marshal.ReadInt32(buffer, 28);
+            if (bus is < 0 or > 255 || device is < 0 or > 31 || function is < 0 or > 7)
+            {
+                return "";
+            }
+
+            return $"{bus:x2}:{device:x2}.{function:x}";
+        }
+        catch (Exception)
+        {
+            return "";
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(buffer);
+        }
     }
 
     private int ReadTempType(IntPtr sensor)
@@ -1080,11 +1443,26 @@ internal sealed class IntelLibrary : IDisposable
         [FieldOffset(16)] public ulong Timestamp;
     }
 
+    private sealed record IntelDevice(
+        IntPtr Handle,
+        string Name,
+        string Pci,
+        string Luid,
+        bool IsIntegrated,
+        IReadOnlyList<IntPtr> Sensors,
+        IReadOnlyList<IntPtr> Engines);
+
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate int CtlInit(ref CtlInitArgs args, out IntPtr api);
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate int CtlClose(IntPtr api);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate int CtlDeviceProps(IntPtr device, IntPtr props);
+
+    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+    private delegate int CtlPciProps(IntPtr device, IntPtr props);
 
     [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
     private delegate int CtlEnum(IntPtr parent, ref uint count, IntPtr items);

@@ -100,16 +100,7 @@ public sealed class DivoomDeviceClient : IDevicePoster, IDisposable
         bool verbose,
         CancellationToken cancellationToken)
     {
-        _ = lcdClockId;
-        var payload = new JsonObject
-        {
-            ["Command"] = "Channel/SetClockSelectId",
-            ["LcdIndependence"] = NumberOrString(lcdIndependence),
-            ["DeviceId"] = NumberOrString(deviceId),
-            ["LcdIndex"] = NumberOrString(lcdIndex),
-            ["ClockId"] = 625,
-        };
-        var json = payload.ToJsonString(JsonOptions);
+        var json = ClockJson(deviceId, lcdIndependence, lcdIndex, lcdClockId);
         if (verbose)
         {
             _log?.Invoke("Select Clock Data to be sent: " + json);

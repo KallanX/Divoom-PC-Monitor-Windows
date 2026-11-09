@@ -58,6 +58,23 @@ public class BehaviorTests
         Assert.Equal(@"\_SB.TZ99", hottest.Name);
         Assert.Equal(37, hottest.Celsius);
         Assert.Null(HardwareMath.SelectThermal(unnamed, "Gpu"));
+
+        var qualcommZones = new[]
+        {
+            new ThermalZone { Name = @"\_SB.TZ0", DeciKelvin = 3070, HardwareId = @"ACPI\VEN_QCOM&DEV_0C58&SUBSYS_83800001 ACPI\QCOM0C58" },
+            new ThermalZone { Name = @"\_SB.TZ4", DeciKelvin = 3090, HardwareId = @"ACPI\VEN_QCOM&DEV_0D01&SUBSYS_83800001 ACPI\QCOM0D01" },
+            new ThermalZone { Name = @"\_SB.TZ6", DeciKelvin = 3066, HardwareId = @"ACPI\VEN_QCOM&DEV_0C91&SUBSYS_83800001 ACPI\QCOM0C91" },
+            new ThermalZone { Name = @"\_SB.TZ99", DeciKelvin = 3110, HardwareId = @"ACPI\VEN_QCOM&DEV_0C5A&SUBSYS_83800001 ACPI\QCOM0C5A" },
+        };
+        var qcomCpu = HardwareMath.SelectThermal(qualcommZones, "Cpu");
+        Assert.NotNull(qcomCpu);
+        Assert.Equal(@"\_SB.TZ4", qcomCpu.Name);
+        Assert.Equal(36, qcomCpu.Celsius);
+
+        var qcomGpu = HardwareMath.SelectThermal(qualcommZones, "Gpu");
+        Assert.NotNull(qcomGpu);
+        Assert.Equal(@"\_SB.TZ6", qcomGpu.Name);
+        Assert.Equal(33, qcomGpu.Celsius);
     }
 
     [Fact]
@@ -193,6 +210,14 @@ public class BehaviorTests
         Assert.Equal(40, HardwareMath.GpuUsage(samples, "luid_0x00000000_0x00010C1B"));
         Assert.Equal(90, HardwareMath.GpuUsage(samples, "luid_0x00000000_0x00099999"));
         Assert.Null(HardwareMath.GpuUsage(samples, "luid_0x00000000_0x00000001"));
+
+        var withNaN = new[]
+        {
+            new EngineSample { InstanceName = "pid_1_luid_0x00000000_0x00010c1b_phys_0_eng_0_engtype_3d", CookedValue = double.NaN },
+            new EngineSample { InstanceName = "pid_2_luid_0x00000000_0x00010c1b_phys_0_eng_0_engtype_3d", CookedValue = 25 },
+            new EngineSample { InstanceName = "pid_3_luid_0x00000000_0x00010c1b_phys_0_eng_1_engtype_compute_0", CookedValue = -5 },
+        };
+        Assert.Equal(25, HardwareMath.GpuUsage(withNaN, "luid_0x00000000_0x00010C1B"));
     }
 
     [Fact]
@@ -231,6 +256,40 @@ public class BehaviorTests
         Assert.NotNull(cleared);
         Assert.Equal("", cleared.Pci);
         Assert.Null(HardwareMath.FromConfig(new MonitorConfig()));
+
+        var refreshedAfterReboot = HardwareMath.Resolve(
+            new MonitorConfig
+            {
+                CpuVendor = "Qualcomm",
+                GpuVendor = "Qualcomm",
+                GpuName = "Qualcomm(R) Adreno(TM) X1-85 GPU",
+                GpuLuid = "luid_0x00000000_0x00010c1b",
+            },
+            [
+                new GpuCard
+                {
+                    Vendor = "Qualcomm",
+                    Name = "Qualcomm(R) Adreno(TM) X1-85 GPU",
+                    Luid = "luid_0x00000000_0x00010429",
+                },
+            ]);
+        Assert.Equal("luid_0x00000000_0x00010429", refreshedAfterReboot.Gpu.Luid);
+
+        var refreshedPciLuid = HardwareMath.Resolve(
+            new MonitorConfig
+            {
+                CpuVendor = "Intel",
+                GpuVendor = "Intel",
+                GpuPci = "03:00.0",
+                GpuName = "Intel(R) Arc(TM) B580 Graphics",
+                GpuLuid = "luid_0x00000000_0x00001111",
+            },
+            [
+                new GpuCard { Vendor = "Intel", Pci = "00:02.0", Name = "Intel(R) UHD Graphics 770", Luid = "luid_0x00000000_0x00002222" },
+                new GpuCard { Vendor = "Intel", Pci = "03:00.0", Name = "Intel(R) Arc(TM) B580 Graphics", Luid = "luid_0x00000000_0x00003333" },
+            ]);
+        Assert.Equal("03:00.0", refreshedPciLuid.Gpu.Pci);
+        Assert.Equal("luid_0x00000000_0x00003333", refreshedPciLuid.Gpu.Luid);
     }
 
     [Fact]
@@ -442,6 +501,34 @@ public class BehaviorTests
         await engine.RunAsync(() => Path.Combine(Path.GetTempPath(), "missing-divoom-config.env"), cancel.Token);
         Assert.Empty(poster.Posts);
         Assert.Equal(TimeSpan.FromSeconds(7), Assert.Single(waits));
+    }
+
+    [Fact]
+    public async Task ChangingIntervalWakesCurrentWait()
+    {
+        var waits = new List<TimeSpan>();
+        var poster = new FakePoster();
+        using var cancel = new CancellationTokenSource();
+        MonitorEngine? engine = null;
+        engine = new MonitorEngine(new FakeSensors(), poster, delay: async (delay, token) =>
+        {
+            waits.Add(delay);
+            if (waits.Count == 1)
+            {
+                engine!.IntervalSeconds = 5;
+                await Task.Delay(TimeSpan.FromSeconds(10), token);
+            }
+            else
+            {
+                cancel.Cancel();
+            }
+        })
+        {
+            IntervalSeconds = 60,
+        };
+
+        await engine.RunAsync(() => Path.Combine(Path.GetTempPath(), "missing-divoom-config.env"), cancel.Token);
+        Assert.Equal([TimeSpan.FromSeconds(60), TimeSpan.FromSeconds(5)], waits);
     }
 
     private sealed class FakeSensors : ISensorSource
